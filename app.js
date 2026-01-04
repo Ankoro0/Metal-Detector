@@ -55,6 +55,9 @@ class DetektorTracker {
         this.dragOffsetX = 0;
         this.dragOffsetY = 0;
 
+        // Navigation
+        this.highlightedCheckpoint = null; // Za žutu liniju navigacije
+
         // Canvas
         this.canvas = document.getElementById('mapCanvas');
         this.ctx = this.canvas.getContext('2d');
@@ -1016,8 +1019,27 @@ class DetektorTracker {
         const checkpoint = this.checkpoints.find(cp => cp.id === checkpointId);
         if (!checkpoint) return;
 
-        // TODO: Implementiraj navigaciju - prikaži putanju na mapi
-        alert(`Navigacija do: ${checkpoint.name}\nLat: ${checkpoint.lat}, Lon: ${checkpoint.lon}`);
+        // Highlightuj checkpoint (žuta linija)
+        this.highlightedCheckpoint = checkpointId;
+        this.draw();
+
+        // Centri map na checkpoint
+        this.originLat = checkpoint.lat;
+        this.originLon = checkpoint.lon;
+        this.draw();
+
+        // Udaljenost
+        if (this.currentGPSPosition) {
+            const distance = this.haversineDistance(
+                this.currentGPSPosition.lat,
+                this.currentGPSPosition.lon,
+                checkpoint.lat,
+                checkpoint.lon
+            );
+            alert(`📍 Navigacija do: ${checkpoint.name}\n📏 Udaljenost: ${distance.toFixed(0)}m\n\n🟡 Žuta linija prikazana na mapi!`);
+        } else {
+            alert(`📍 Navigacija do: ${checkpoint.name}\nLat: ${checkpoint.lat.toFixed(6)}, Lon: ${checkpoint.lon.toFixed(6)}\n\n🟡 Žuta linija prikazana na mapi!`);
+        }
     }
 
     // ===== FIND MODAL (Iskopano) =====
@@ -1388,12 +1410,12 @@ class DetektorTracker {
         // NE crtaj plavu track liniju - samo prati u pozadini!
         // Track se koristi samo za pathfinding do checkpointa
 
-        // Crta checkpointe sa NAJKRAĆOM STVARNOM RUTOM
+        // Crta checkpointe UVEK (sa ili bez putanje)
         this.checkpoints.forEach((cp, index) => {
             const point = this.latLonToCanvas(cp.lat, cp.lon);
             
-            // Nađi najkraći STVARNI put od START do checkpointa
-            if (cp.trackIndex !== undefined && cp.trackIndex > 0) {
+            // Ako ima trackIndex, crta najkraći STVARNI put od START do checkpointa
+            if (cp.trackIndex !== undefined && cp.trackIndex > 0 && this.trackPoints.length > 0) {
                 const isHighlighted = this.highlightedCheckpoint === cp.id;
                 const path = this.findShortestWalkedPath(cp.trackIndex);
                 
@@ -1422,7 +1444,7 @@ class DetektorTracker {
                 ctx.stroke();
             }
 
-            // Checkpoint marker - različite boje po statusu
+            // Checkpoint marker - UVEK SE CRTA (različite boje po statusu)
             const statusColors = {
                 'ACTIVE': '#3498db',
                 'DUG': '#2ecc71',
@@ -1434,6 +1456,11 @@ class DetektorTracker {
             ctx.beginPath();
             ctx.arc(point.x, point.y, 10, 0, Math.PI * 2);
             ctx.fill();
+
+            // Okvir oko checkpointa za bolju vidljivost
+            ctx.strokeStyle = 'white';
+            ctx.lineWidth = 2;
+            ctx.stroke();
 
             // Broj checkpointa
             ctx.fillStyle = 'white';
