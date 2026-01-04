@@ -12,8 +12,14 @@ class DetektorTracker {
 
         // GPS Filtering
         this.lastAcceptedPoint = null;
-        this.minDistanceMeters = 2; // ignoriši tačke bliže od 2m
-        this.maxAccuracyMeters = 50; // ignoriši tačke sa lošom tačnošću (povećano za mobilne)
+        this.currentGPSPosition = null; // najnovija GPS pozicija (za checkpoint)
+        this.minDistanceMeters = 10; // ignoriši tačke bliže od 10m (GPS noise)
+        this.maxAccuracyMeters = 25; // strožiji filter za tačnost
+        this.gpsSettlingTime = 15000; // prvih 15s ignoriši dok se GPS ne stabilizuje
+        
+        // Stationary detection
+        this.stationaryCheckInterval = null;
+        this.lastMovementTime = null;
 
         // TEST MODE - simulirani GPS za desktop testiranje
         this.testMode = false;
@@ -374,10 +380,28 @@ class DetektorTracker {
     handleGPSUpdate(position) {
         const { latitude, longitude, accuracy } = position.coords;
 
+        // UVEK čuvaj najnoviju GPS poziciju (za checkpoint)
+        this.currentGPSPosition = {
+            lat: latitude,
+            lon: longitude,
+            accuracy: accuracy,
+            timestamp: Date.now()
+        };
+
+        // GPS SETTLING PERIOD - ignoriši prvih 10s dok se stabilizuje
+        const timeSinceStart = Date.now() - this.startTime;
+        if (timeSinceStart < this.gpsSettlingTime && this.trackPoints.length === 0) {
+            this.gpsText.textContent = `GPS Kalibriše... ${Math.floor((this.gpsSettlingTime - timeSinceStart) / 1000)}s`;
+            return;
+        }
+
         // GPS FILTERING - ignoriši loše podatke
         if (accuracy > this.maxAccuracyMeters) {
             console.log(`GPS tačnost loša: ${accuracy.toFixed(1)}m (skip)`);
+            this.gpsText.textContent = `GPS Signal Slab (${accuracy.toFixed(0)}m)`;
             return;
+        } else {
+            this.gpsText.textContent = 'GPS Aktivan';
         }
 
         // Proveri distancu od poslednje prihvaćene tačke
@@ -391,8 +415,12 @@ class DetektorTracker {
 
             // Ako si se pomerio manje od minDistance, ignoriši (stajanje na mestu)
             if (distance < this.minDistanceMeters) {
+                // Ali ipak updateuj currentGPSPosition za precizne checkpointe
                 return;
             }
+            
+            // Stvarno kretanje!
+            this.lastMovementTime = Date.now();
         }
 
         // Postavi origin ako je prvi point
@@ -523,19 +551,34 @@ class DetektorTracker {
             return;
         }
 
-        if (this.trackPoints.length === 0) {
+        // Koristi TRENUTNU GPS poziciju (ne poslednji track point!)
+        if (!this.currentGPSPosition) {
             alert('Nema GPS podataka!');
             return;
         }
 
-        // Trenutna pozicija (poslednji GPS point)
-        const currentPoint = this.trackPoints[this.trackPoints.length - 1];
+        //ВАЖНО: Dodaj trenutnu poziciju u trackPoints ako nije već tu
+        const lastPoint = this.trackPoints[this.trackPoints.length - 1];
+        const distFromLast = lastPoint ? this.haversineDistance(
+            lastPoint.lat, lastPoint.lon,
+            this.currentGPSPosition.lat, this.currentGPSPosition.lon
+        ) : Infinity;
+
+        // Ako je trenutna pozicija > 1m od poslednje, dodaj je
+        if (distFromLast > 1) {
+            this.trackPoints.push({
+                lat: this.currentGPSPosition.lat,
+                lon: this.currentGPSPosition.lon,
+                accuracy: this.currentGPSPosition.accuracy,
+                timestamp: Date.now()
+            });
+        }
 
         const checkpoint = {
             sessionId: this.currentSession,
             name: name,
-            lat: currentPoint.lat,
-            lon: currentPoint.lon,
+            lat: this.currentGPSPosition.lat,
+            lon: this.currentGPSPosition.lon,
             timestamp: Date.now(),
             status: 'ACTIVE', // ACTIVE, DUG, IGNORED, RECHECK
             trackIndex: this.trackPoints.length - 1, // index umesto kopije patha!
