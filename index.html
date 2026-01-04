@@ -13,6 +13,12 @@
         <!-- Header -->
         <header class="header">
             <h1>Detektor Tracker</h1>
+            <div class="session-selector">
+                <select id="sessionSelect" class="session-dropdown">
+                    <option value="">-- Nova Sesija --</option>
+                </select>
+                <button id="newSessionBtn" class="btn-small btn-new-session">➕</button>
+            </div>
             <div class="gps-status" id="gpsStatus">
                 <span class="gps-indicator"></span>
                 <span id="gpsText">GPS Neaktivan</span>
@@ -111,10 +117,6 @@
         </div>
     </div>
 
-    <script>
-        console.log('🚀 DETEKTOR TRACKER v2.1 - OPTIMIZOVANO (4.1.2026 - 14:00)');
-        console.log('✅ GPS maxSpeed: 15 m/s | Smoothed stationary | Dynamic radius | Geocoding cache');
-    </script>
     <script src="db.js?v=2"></script>
     <script src="app.js?v=2"></script>
 </body>

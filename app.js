@@ -13,6 +13,7 @@ class DetektorTracker {
         // GPS Filtering - GPSLogger Android sistem
         this.lastAcceptedPoint = null;
         this.currentGPSPosition = null;
+        this.debugGPS = false; // Debug logging (false u produkciji za bateriju)
         
         // Parametri (GPSLogger style)
         this.minDistanceMeters = 5; // minimum distance
@@ -94,6 +95,10 @@ class DetektorTracker {
         this.importFile = document.getElementById('importFile');
         this.copyAIBtn = document.getElementById('copyAIBtn');
 
+        // Session management
+        this.sessionSelect = document.getElementById('sessionSelect');
+        this.newSessionBtn = document.getElementById('newSessionBtn');
+
         // Info banner
         this.infoBanner = document.getElementById('infoBanner');
         this.closeInfoBtn = document.getElementById('closeInfoBtn');
@@ -128,14 +133,19 @@ class DetektorTracker {
         this.importFile.addEventListener('change', (e) => this.importData(e));
         this.copyAIBtn.addEventListener('click', () => this.copyForAI());
 
+        // Session management
+        this.sessionSelect.addEventListener('change', (e) => this.switchSession(e.target.value));
+        this.newSessionBtn.addEventListener('click', () => this.createNewSession());
+
         // Info banner
         this.closeInfoBtn.addEventListener('click', () => this.closeInfoBanner());
 
         // Proveri GPS dostupnost
         this.checkGPSAvailability();
 
-        // Učitaj checkpointe iz trenutne sesije ako postoje
-        this.loadCheckpoints();
+        // Učitaj sve sesije i poslednju sesiju
+        await this.loadSessions();
+        await this.loadLastSession();
 
         // Prikaži info banner ako korisnik prvi put pokreće app
         this.showInfoBannerIfFirstTime();
@@ -273,6 +283,105 @@ class DetektorTracker {
         }
     }
 
+    // ===== SESSION MANAGEMENT =====
+
+    async loadSessions() {
+        const sessions = await detektorDB.getAllSessions();
+        
+        // Sortiraj po datumu (najnovije prvo)
+        sessions.sort((a, b) => b.startTime - a.startTime);
+        
+        // Popuni dropdown
+        this.sessionSelect.innerHTML = '<option value="">-- Nova Sesija --</option>';
+        sessions.forEach(session => {
+            const option = document.createElement('option');
+            option.value = session.id;
+            const date = new Date(session.startTime).toLocaleDateString('sr-RS');
+            const name = session.name || `Sesija ${date}`;
+            option.textContent = `${name} (${date})`;
+            this.sessionSelect.appendChild(option);
+        });
+    }
+
+    async loadLastSession() {
+        const sessions = await detektorDB.getAllSessions();
+        if (sessions.length === 0) return;
+        
+        // Sortiraj i uzmi poslednju
+        sessions.sort((a, b) => b.startTime - a.startTime);
+        const lastSession = sessions[0];
+        
+        // Postavi kao trenutnu
+        this.currentSession = lastSession.id;
+        this.sessionSelect.value = lastSession.id;
+        
+        // Učitaj podatke
+        await this.loadSessionData(lastSession.id);
+    }
+
+    async switchSession(sessionId) {
+        if (!sessionId) {
+            // Nova sesija - očisti sve
+            this.currentSession = null;
+            this.trackPoints = [];
+            this.checkpoints = [];
+            this.renderCheckpoints();
+            this.draw();
+            return;
+        }
+        
+        // Učitaj izabranu sesiju
+        this.currentSession = parseInt(sessionId);
+        await this.loadSessionData(this.currentSession);
+    }
+
+    async loadSessionData(sessionId) {
+        // Učitaj track
+        const tracks = await detektorDB.getTracksBySession(sessionId);
+        this.trackPoints = tracks.length > 0 ? tracks[0].points : [];
+        
+        // Učitaj checkpointe
+        this.checkpoints = await detektorDB.getCheckpointsBySession(sessionId);
+        
+        // Postavi origin ako ima tačaka
+        if (this.trackPoints.length > 0) {
+            this.originLat = this.trackPoints[0].lat;
+            this.originLon = this.trackPoints[0].lon;
+            this.lastAcceptedPoint = this.trackPoints[this.trackPoints.length - 1];
+        }
+        
+        // Renderuj
+        this.renderCheckpoints();
+        this.centerMap();
+    }
+
+    async createNewSession() {
+        const name = prompt('Naziv lokacije (npr: Lovćen, Gnjijevi Do, Bukovica):');
+        if (!name) return;
+        
+        const session = {
+            name: name.trim(),
+            startTime: Date.now(),
+            endTime: null,
+            totalDistance: 0
+        };
+        
+        const sessionId = await detektorDB.saveSession(session);
+        this.currentSession = sessionId;
+        
+        // Refresh dropdown i selektuj novu
+        await this.loadSessions();
+        this.sessionSelect.value = sessionId;
+        
+        // Očisti trenutne podatke
+        this.trackPoints = [];
+        this.checkpoints = [];
+        this.renderCheckpoints();
+        this.draw();
+        
+        alert(`✅ Sesija "${name}" kreirana!`);
+    }
+
     // ===== TRACKING =====
     
     async startTestMode() {
@@ -354,14 +463,19 @@ class DetektorTracker {
         this.trackPoints = [];
         this.checkpoints = [];
 
-        // Kreiraj sesiju
-        const session = {
-            startTime: this.startTime,
-            endTime: null,
-            totalDistance: 0
-        };
-
-        this.currentSession = await detektorDB.saveSession(session);
+        // Kreiraj sesiju (ili koristi izabranu)
+        if (!this.currentSession) {
+            const name = prompt('Naziv lokacije (npr: Lovćen, Gnjijevi Do):') || 'Neimenovana lokacija';
+            const session = {
+                name: name.trim(),
+                startTime: this.startTime,
+                endTime: null,
+                totalDistance: 0
+            };
+            this.currentSession = await detektorDB.saveSession(session);
+            await this.loadSessions(); // Refresh dropdown
+            this.sessionSelect.value = this.currentSession;
+        }
 
         // Start GPS tracking
         this.gpsWatchId = navigator.geolocation.watchPosition(
@@ -404,10 +518,12 @@ class DetektorTracker {
             timestamp: timestamp
         };
 
-        // Buffer za stationary
-        this.recentPoints.push({lat: latitude, lon: longitude, time: timestamp});
-        if (this.recentPoints.length > this.stationaryCheckCount) {
-            this.recentPoints.shift();
+        // Buffer za stationary - SAMO DOBRE TAČKE (ChatGPT fix!)
+        if (accuracy && accuracy <= this.maxAccuracyMeters) {
+            this.recentPoints.push({lat: latitude, lon: longitude, accuracy: accuracy, time: timestamp});
+            if (this.recentPoints.length > this.stationaryCheckCount) {
+                this.recentPoints.shift();
+            }
         }
 
         // FILTER 1: Settling
@@ -419,7 +535,7 @@ class DetektorTracker {
 
         // FILTER 2: Stale location (GPSLogger)
         if (this.lastAcceptedPoint && timestamp <= this.lastAcceptedPoint.timestamp) {
-            console.log('❌ Stale GPS');
+            if (this.debugGPS) console.log('❌ Stale GPS');
             return;
         }
 
@@ -434,7 +550,7 @@ class DetektorTracker {
 
         // FILTER 4: Accuracy (GPSLogger)
         if (!accuracy || accuracy > this.maxAccuracyMeters) {
-            console.log(`❌ Accuracy: ${accuracy ? accuracy.toFixed(0) : 'N/A'}m`);
+            if (this.debugGPS) console.log(`❌ Accuracy: ${accuracy ? accuracy.toFixed(0) : 'N/A'}m`);
             this.gpsText.textContent = `GPS Weak (${accuracy ? accuracy.toFixed(0) : '?'}m)`;
             return;
         }
@@ -453,21 +569,13 @@ class DetektorTracker {
                 const speed = distance / timeDiff; // m/s
                 
                 if (speed > this.maxSpeedMps) {
-                    console.log(`❌ GPS JUMP: ${distance.toFixed(0)}m in ${timeDiff.toFixed(1)}s = ${(speed * 3.6).toFixed(0)} km/h`);
+                    if (this.debugGPS) console.log(`❌ GPS JUMP: ${distance.toFixed(0)}m in ${timeDiff.toFixed(1)}s = ${(speed * 3.6).toFixed(0)} km/h`);
                     return;
                 }
             }
         }
 
-        // FILTER 6: STATIONARY (anti-drift)
-        if (this.isStationary()) {
-            console.log('🛑 Stationary');
-            this.gpsText.textContent = 'GPS (stationary)';
-            this.updateSmoothedPosition(latitude, longitude);
-            return;
-        }
-
-        // FILTER 7: Distance threshold
+        // FILTER 6: Distance threshold (PRIJE stationary - ChatGPT order fix!)
         if (this.lastAcceptedPoint) {
             const distance = this.haversineDistance(
                 this.lastAcceptedPoint.lat,
@@ -480,6 +588,14 @@ class DetektorTracker {
                 this.updateSmoothedPosition(latitude, longitude);
                 return;
             }
+        }
+
+        // FILTER 7: STATIONARY (anti-drift) - zadnji check da bi distance imao prednost
+        if (this.isStationary()) {
+            if (this.debugGPS) console.log('🛑 Stationary');
+            this.gpsText.textContent = 'GPS (stationary)';
+            this.updateSmoothedPosition(latitude, longitude);
+            return;
         }
 
         // ✅ ALL FILTERS PASSED!
@@ -506,7 +622,7 @@ class DetektorTracker {
         this.lastAcceptedPoint = point;
 
         const totalDist = this.calculateTotalDistance();
-        console.log(`✅ GPS: ${accuracy.toFixed(0)}m | Total: ${totalDist.toFixed(0)}m`);
+        if (this.debugGPS) console.log(`✅ GPS: ${accuracy.toFixed(0)}m | Total: ${totalDist.toFixed(0)}m`);
         this.gpsText.textContent = `GPS Active (${accuracy.toFixed(0)}m)`;
 
         this.updateDistance();
@@ -517,14 +633,19 @@ class DetektorTracker {
         // Proveri da li si u krugu stationaryRadius poslednjih N tačaka
         if (this.recentPoints.length < 5) return false;
 
-        // Izračunaj centroid (prosek) poslednjih tačaka - KORISTI SMOOTHED!
+        // ACCURACY CHECK (ChatGPT fix!) - ne tvrdi da stojiš ako GPS nije siguran
+        const worstAcc = Math.max(...this.recentPoints.map(p => p.accuracy || 0));
+        if (worstAcc > this.stationaryRadiusMeters) {
+            if (this.debugGPS) console.log(`📍 Stationary SKIP: worst accuracy ${worstAcc.toFixed(0)}m > ${this.stationaryRadiusMeters}m`);
+            return false;
+        }
+
+        // Izračunaj centroid (prosek) poslednjih tačaka - KORISTI RAW (ChatGPT critical fix!)
         let sumLat = 0, sumLon = 0;
         this.recentPoints.forEach(p => {
-            // Koristi smoothed pozicije ako postoje, inače raw
-            const lat = this.smoothedLat ?? p.lat;
-            const lon = this.smoothedLon ?? p.lon;
-            sumLat += lat;
-            sumLon += lon;
+            // Koristi RAW pozicije za svaku tačku posebno!
+            sumLat += p.lat;
+            sumLon += p.lon;
         });
         const centerLat = sumLat / this.recentPoints.length;
         const centerLon = sumLon / this.recentPoints.length;
@@ -532,9 +653,8 @@ class DetektorTracker {
         // Proveri da li su SVE tačke u krugu od centroida
         let maxDist = 0;
         for (let p of this.recentPoints) {
-            const lat = this.smoothedLat ?? p.lat;
-            const lon = this.smoothedLon ?? p.lon;
-            const dist = this.haversineDistance(centerLat, centerLon, lat, lon);
+            // RAW pozicije, ne smoothed!
+            const dist = this.haversineDistance(centerLat, centerLon, p.lat, p.lon);
             if (dist > maxDist) maxDist = dist;
         }
 
@@ -545,7 +665,7 @@ class DetektorTracker {
         );
 
         // DEBUG: prikaži radius check
-        console.log(`📍 Stationary: maxDist=${maxDist.toFixed(1)}m, threshold=${dynamicRadius.toFixed(1)}m`);
+        if (this.debugGPS) console.log(`📍 Stationary: maxDist=${maxDist.toFixed(1)}m, threshold=${dynamicRadius.toFixed(1)}m`);
 
         // Ako je najdalja tačka < radius, stojiš!
         return maxDist < dynamicRadius;
@@ -565,7 +685,7 @@ class DetektorTracker {
         this.currentGPSPosition = {
             lat: this.smoothedLat,
             lon: this.smoothedLon,
-            accuracy: this.currentGPSPosition.accuracy,
+            accuracy: this.currentGPSPosition?.accuracy ?? null,
             timestamp: Date.now()
         };
     }

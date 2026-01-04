@@ -78,6 +78,17 @@ class DetektorDB {
         });
     }
 
+    async getAllSessions() {
+        return new Promise((resolve, reject) => {
+            const transaction = this.db.transaction(['sessions'], 'readonly');
+            const store = transaction.objectStore('sessions');
+            const request = store.getAll();
+            
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+        });
+    }
+
     // Checkpointi
     async saveCheckpoint(checkpoint) {
         return new Promise((resolve, reject) => {
