@@ -10,30 +10,21 @@ class DetektorTracker {
         this.startTime = null;
         this.timerInterval = null;
 
-        // GPS Filtering - ANTI-DRIFT sistem
+        // GPS Filtering - GPSLogger Android sistem
         this.lastAcceptedPoint = null;
         this.currentGPSPosition = null;
-        this.gpsBuffer = []; // buffer za stationary detection
-        this.gpsBufferSize = 10; // poslednjih 10 GPS čitanja
         
-        // Parametri
-        this.minDistanceMeters = 5; // minimum kad se STVARNO krećeš
-        this.maxAccuracyMeters = 50;
-        this.minAccuracyForInstantAccept = 10;
-        this.gpsSettlingTime = 5000;
-        
-        // STATIONARY DETECTION - KLJUČ ZA ANTI-DRIFT!
-        this.stationaryRadiusMeters = 15; // ako si u krugu 15m = stojiš
-        this.stationaryMinTime = 8000; // proveri poslednjih 8s
-        this.isStationary = false;
-        
-        // Speed filtering
-        this.maxRealisticSpeed = 10;
-        this.lastPointTime = null;
+        // Parametri (GPSLogger style)
+        this.minDistanceMeters = 5; // minimum distance
+        this.maxAccuracyMeters = 40; // maximum acceptable accuracy
+        this.minIntervalSeconds = 2; // minimum time between points
+        this.maxSpeedMps = 100; // 100 m/s = 360 km/h (unrealistic for walking)
+        this.gpsSettlingTime = 3000; // 3s initial settling
         
         // Stationary detection buffer
         this.recentPoints = [];
-        this.stationaryCheckCount = 10; // proveri poslednjih 10 tačaka
+        this.stationaryCheckCount = 10;
+        this.stationaryRadiusMeters = 15;
         
         // Kalman smoothing
         this.smoothedLat = null;
@@ -398,71 +389,80 @@ class DetektorTracker {
 
     handleGPSUpdate(position) {
         const { latitude, longitude, accuracy } = position.coords;
+        const timestamp = Date.now();
 
-        // UVEK čuvaj raw GPS poziciju
+        // UVEK čuvaj raw GPS
         this.currentGPSPosition = {
             lat: latitude,
             lon: longitude,
             accuracy: accuracy,
-            timestamp: Date.now()
+            timestamp: timestamp
         };
 
-        // Dodaj u recent points buffer za stationary detection
-        this.recentPoints.push({lat: latitude, lon: longitude, time: Date.now()});
+        // Buffer za stationary
+        this.recentPoints.push({lat: latitude, lon: longitude, time: timestamp});
         if (this.recentPoints.length > this.stationaryCheckCount) {
             this.recentPoints.shift();
         }
 
-        // FILTER 0: Settling period
-        const timeSinceStart = Date.now() - this.startTime;
+        // FILTER 1: Settling
+        const timeSinceStart = timestamp - this.startTime;
         if (timeSinceStart < this.gpsSettlingTime && this.trackPoints.length === 0) {
-            this.gpsText.textContent = `GPS Kalibrira... ${Math.floor((this.gpsSettlingTime - timeSinceStart) / 1000)}s`;
+            this.gpsText.textContent = `GPS Settling ${Math.floor((this.gpsSettlingTime - timeSinceStart) / 1000)}s`;
             return;
         }
 
-        // FILTER 1: Accuracy check
-        if (accuracy > this.maxAccuracyMeters) {
-            console.log(`❌ GPS accuracy poor: ${accuracy.toFixed(1)}m`);
-            this.gpsText.textContent = `GPS Weak (${accuracy.toFixed(0)}m)`;
+        // FILTER 2: Stale location (GPSLogger)
+        if (this.lastAcceptedPoint && timestamp <= this.lastAcceptedPoint.timestamp) {
+            console.log('❌ Stale GPS');
             return;
         }
 
-        // FILTER 2: Time threshold - mora proći dovoljno vremena
-        if (this.lastPointTime) {
-            const timeSinceLastPoint = Date.now() - this.lastPointTime;
-            if (timeSinceLastPoint < this.minTimeBetweenPoints) {
-                // Update smoothed position but don't add point
+        // FILTER 3: Time interval (GPSLogger)
+        if (this.lastAcceptedPoint) {
+            const timeDiff = (timestamp - this.lastAcceptedPoint.timestamp) / 1000;
+            if (timeDiff < this.minIntervalSeconds) {
                 this.updateSmoothedPosition(latitude, longitude);
                 return;
             }
         }
 
-        // FILTER 3: STATIONARY DETECTION - AKO STOJIŠ, NE DODAVAJ!
-        if (this.isStationary()) {
-            console.log('🚧 Stationary detected - ignoring GPS drift');
-            this.gpsText.textContent = 'GPS Active (standing)';
-            this.updateSmoothedPosition(latitude, longitude);
+        // FILTER 4: Accuracy (GPSLogger)
+        if (!accuracy || accuracy > this.maxAccuracyMeters) {
+            console.log(`❌ Accuracy: ${accuracy ? accuracy.toFixed(0) : 'N/A'}m`);
+            this.gpsText.textContent = `GPS Weak (${accuracy ? accuracy.toFixed(0) : '?'}m)`;
             return;
         }
 
-        // FILTER 4: Speed check (unrealistic jumps)
-        if (this.lastAcceptedPoint && this.lastPointTime) {
+        // FILTER 5: GPS JUMP DETECTION (GPSLogger method!)
+        if (this.lastAcceptedPoint) {
             const distance = this.haversineDistance(
                 this.lastAcceptedPoint.lat,
                 this.lastAcceptedPoint.lon,
                 latitude,
                 longitude
             );
-            const timeDiff = (Date.now() - this.lastPointTime) / 1000;
-            const speed = timeDiff > 0 ? distance / timeDiff : 0;
-
-            if (speed > this.maxRealisticSpeed) {
-                console.log(`❌ Speed unrealistic: ${speed.toFixed(1)} m/s`);
-                return;
+            const timeDiff = (timestamp - this.lastAcceptedPoint.timestamp) / 1000;
+            
+            if (timeDiff > 0) {
+                const speed = distance / timeDiff; // m/s
+                
+                if (speed > this.maxSpeedMps) {
+                    console.log(`❌ GPS JUMP: ${distance.toFixed(0)}m in ${timeDiff.toFixed(1)}s = ${(speed * 3.6).toFixed(0)} km/h`);
+                    return;
+                }
             }
         }
 
-        // FILTER 5: Distance threshold
+        // FILTER 6: STATIONARY (anti-drift)
+        if (this.isStationary()) {
+            console.log('🛑 Stationary');
+            this.gpsText.textContent = 'GPS (stationary)';
+            this.updateSmoothedPosition(latitude, longitude);
+            return;
+        }
+
+        // FILTER 7: Distance threshold
         if (this.lastAcceptedPoint) {
             const distance = this.haversineDistance(
                 this.lastAcceptedPoint.lat,
@@ -471,24 +471,17 @@ class DetektorTracker {
                 longitude
             );
 
-            // Dynamic threshold based on accuracy
-            const threshold = accuracy < this.minAccuracyForInstantAccept 
-                ? this.minDistanceMeters * 0.7 
-                : this.minDistanceMeters;
-
-            if (distance < threshold) {
-                // Update smoothed position even if not adding point
+            if (distance < this.minDistanceMeters) {
                 this.updateSmoothedPosition(latitude, longitude);
                 return;
             }
         }
 
-        // FILTER 6: Apply Kalman-like smoothing
+        // ✅ ALL FILTERS PASSED!
         this.updateSmoothedPosition(latitude, longitude);
         const finalLat = this.smoothedLat || latitude;
         const finalLon = this.smoothedLon || longitude;
 
-        // Initialize origin
         if (this.trackPoints.length === 0) {
             this.originLat = finalLat;
             this.originLon = finalLon;
@@ -497,22 +490,20 @@ class DetektorTracker {
             this.checkpointBtn.disabled = false;
         }
 
-        // Add smoothed point
         const point = {
             lat: finalLat,
             lon: finalLon,
             accuracy: accuracy,
-            timestamp: Date.now()
+            timestamp: timestamp
         };
 
         this.trackPoints.push(point);
         this.lastAcceptedPoint = point;
-        this.lastPointTime = Date.now();
 
-        console.log(`✅ GPS OK: ${accuracy.toFixed(1)}m, dist: ${this.lastAcceptedPoint ? this.haversineDistance(this.lastAcceptedPoint.lat, this.lastAcceptedPoint.lon, finalLat, finalLon).toFixed(1) : 0}m`);
+        const totalDist = this.calculateTotalDistance();
+        console.log(`✅ GPS: ${accuracy.toFixed(0)}m | Total: ${totalDist.toFixed(0)}m`);
         this.gpsText.textContent = `GPS Active (${accuracy.toFixed(0)}m)`;
 
-        // Update UI
         this.updateDistance();
         this.draw();
     }
