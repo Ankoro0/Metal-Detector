@@ -295,7 +295,7 @@ class DetektorTracker {
         sessions.sort((a, b) => b.startTime - a.startTime);
         
         // Popuni dropdown
-        this.sessionSelect.innerHTML = '<option value="">-- New Session --</option>';
+        this.sessionSelect.innerHTML = '';
         sessions.forEach(session => {
             const option = document.createElement('option');
             option.value = session.id;
@@ -493,11 +493,12 @@ class DetektorTracker {
 
         this.isTracking = true;
         this.startTime = Date.now();
-        this.trackPoints = [];
-        this.checkpoints = [];
 
         // Kreiraj sesiju (ili koristi izabranu)
         if (!this.currentSession) {
+            // Samo ako nema sesije, očisti sve
+            this.trackPoints = [];
+            this.checkpoints = [];
             const name = prompt('Naziv lokacije (npr: Lovćen, Gnjijevi Do):') || 'Neimenovana lokacija';
             const session = {
                 name: name.trim(),
