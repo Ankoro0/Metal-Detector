@@ -759,7 +759,7 @@ class DetektorTracker {
                         <div class="checkpoint-meta">
                             ${new Date(cp.timestamp).toLocaleString('sr-RS')} • ${cp.distanceFromStart.toFixed(0)}m<br>
                             Signal: <strong>${this.getSignalLabel(cp.signalStrength)}</strong>
-                            ${cp.depth ? ` • Dubina: ${cp.depth}cm` : ''}
+                            ${cp.depth ? ` • Dubina: ${cp.depth} linija` : ''}
                             ${cp.idRange ? ` • ${cp.idRange}` : ''}<br>
                             <em class="status-badge">${statusText[cp.status]}</em>
                         </div>
@@ -1333,9 +1333,9 @@ class DetektorTracker {
                 prompt += `   Teren: ${cp.terrainType}\n`;
             }
             prompt += `   GPS: ${cp.lat.toFixed(6)}, ${cp.lon.toFixed(6)}\n`;
-            prompt += `   Signal (VID): ${cp.idRange || 'N/A'}\n`;
+            prompt += `   Signal (VDI): ${cp.idRange || 'N/A'}\n`;
             prompt += `   Jačina: ${this.getSignalLabel(cp.signalStrength)}\n`;
-            prompt += `   Dubina: ${cp.depth ? cp.depth + 'cm' : 'N/A'}\n`;
+            prompt += `   Dubina: ${cp.depth ? cp.depth + ' linija (depth segment)' : 'N/A'}\n`;
             prompt += `   Distanca od starta: ${cp.distanceFromStart.toFixed(0)}m\n`;
             if (cp.notes) {
                 prompt += `   Napomena: ${cp.notes}\n`;
@@ -1346,10 +1346,12 @@ class DetektorTracker {
         prompt += `\n` + `=`.repeat(50) + `\n\n`;
         prompt += `INFORMACIJE O OPREMI:\n`;
         prompt += `- Detektor: Minelab X-Terra Pro\n`;
-        prompt += `- Dubinski indikator: Grubo precizan (pretpostavlja meta veličine novčića)\n`;
-        prompt += `  • Velike mete: Mogu biti dublje nego što pokazuje (jak signal vara detektor)\n`;
-        prompt += `  • Sitne mete: Mogu biti plići nego što pokazuje (slab signal)\n`;
-        prompt += `  • Indikator je RELATIVAN, ne apsolutno tačan!\n\n`;
+        prompt += `- VDI (Variable Iron Discrimination): -19 do 99 (gvožđe = negativno, crveni metali = visoko)\n`;
+        prompt += `- Dubinski indikator: 1-5 linija na ekranu (ne cm!)\n`;
+        prompt += `  • 1 linija ≈ 1 inch ≈ 2.5cm (GRUBA procena za predmet veličine novčića)\n`;
+        prompt += `  • Velike mete: Pokazuje PLIĆI signal (jak signal vara detektor)\n`;
+        prompt += `  • Sitne mete: Pokazuje DUBLJI signal (slab signal)\n`;
+        prompt += `  • Indikator je RELATIVAN prema veličini, ne apsolutna dubina!\n\n`;
         prompt += `=`.repeat(50) + `\n\n`;
         prompt += `MOLIM TE ANALIZIRAJ:\n`;
         prompt += `VAŽNO: Prvo pronađi na webu dokumentaciju za "X-Terra Pro Minelab" da razumeš VID signale i specifikacije.\n\n`;
@@ -1444,7 +1446,7 @@ class DetektorTracker {
         this.draw();
 
         // Prikaži info
-        alert(`📍 ${checkpoint.name}\n\nSignal: ${this.getSignalLabel(checkpoint.signalStrength)}\n${checkpoint.depth ? `Dubina: ${checkpoint.depth}cm\n` : ''}${checkpoint.idRange ? `ID: ${checkpoint.idRange}\n` : ''}${checkpoint.notes ? `\nNapomena: ${checkpoint.notes}` : ''}\n\nDistanca od starta: ${checkpoint.distanceFromStart.toFixed(0)}m`);
+        alert(`📍 ${checkpoint.name}\n\nSignal: ${this.getSignalLabel(checkpoint.signalStrength)}\n${checkpoint.depth ? `Dubina: ${checkpoint.depth} linija\n` : ''}${checkpoint.idRange ? `ID: ${checkpoint.idRange}\n` : ''}${checkpoint.notes ? `\nNapomena: ${checkpoint.notes}` : ''}\n\nDistanca od starta: ${checkpoint.distanceFromStart.toFixed(0)}m`);
     }
 
     // ===== INFO BANNER =====
