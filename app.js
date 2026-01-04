@@ -10,16 +10,26 @@ class DetektorTracker {
         this.startTime = null;
         this.timerInterval = null;
 
-        // GPS Filtering
+        // GPS Filtering - profesionalni algoritam
         this.lastAcceptedPoint = null;
-        this.currentGPSPosition = null; // najnovija GPS pozicija (za checkpoint)
-        this.minDistanceMeters = 10; // ignoriši tačke bliže od 10m (GPS noise)
-        this.maxAccuracyMeters = 25; // strožiji filter za tačnost
-        this.gpsSettlingTime = 15000; // prvih 15s ignoriši dok se GPS ne stabilizuje
+        this.currentGPSPosition = null;
+        this.gpsBuffer = []; // buffer poslednjih N tačaka za averaging
+        this.gpsBufferSize = 5;
         
-        // Stationary detection
-        this.stationaryCheckInterval = null;
-        this.lastMovementTime = null;
+        // Dinamički filtering parametri
+        this.minDistanceMeters = 8; // minimum movement threshold
+        this.maxAccuracyMeters = 50; // reject poor signals
+        this.minAccuracyForInstantAccept = 10; // excellent GPS - accept immediately
+        this.gpsSettlingTime = 5000; // initial settling period
+        
+        // Speed-based filtering
+        this.maxRealisticSpeed = 10; // 10 m/s = 36 km/h (impossible on foot)
+        this.lastPointTime = null;
+        
+        // Kalman-like smoothing
+        this.smoothedLat = null;
+        this.smoothedLon = null;
+        this.smoothingFactor = 0.3; // 0-1, lower = more smoothing
 
         // TEST MODE - simulirani GPS za desktop testiranje
         this.testMode = false;
@@ -380,7 +390,7 @@ class DetektorTracker {
     handleGPSUpdate(position) {
         const { latitude, longitude, accuracy } = position.coords;
 
-        // UVEK čuvaj najnoviju GPS poziciju (za checkpoint)
+        // UVEK čuvaj raw GPS poziciju
         this.currentGPSPosition = {
             lat: latitude,
             lon: longitude,
@@ -388,23 +398,38 @@ class DetektorTracker {
             timestamp: Date.now()
         };
 
-        // GPS SETTLING PERIOD - ignoriši prvih 10s dok se stabilizuje
+        // FILTER 0: Settling period
         const timeSinceStart = Date.now() - this.startTime;
         if (timeSinceStart < this.gpsSettlingTime && this.trackPoints.length === 0) {
-            this.gpsText.textContent = `GPS Kalibriše... ${Math.floor((this.gpsSettlingTime - timeSinceStart) / 1000)}s`;
+            this.gpsText.textContent = `GPS Kalibrira... ${Math.floor((this.gpsSettlingTime - timeSinceStart) / 1000)}s`;
             return;
         }
 
-        // GPS FILTERING - ignoriši loše podatke
+        // FILTER 1: Accuracy check
         if (accuracy > this.maxAccuracyMeters) {
-            console.log(`GPS tačnost loša: ${accuracy.toFixed(1)}m (skip)`);
-            this.gpsText.textContent = `GPS Signal Slab (${accuracy.toFixed(0)}m)`;
+            console.log(`❌ GPS accuracy poor: ${accuracy.toFixed(1)}m`);
+            this.gpsText.textContent = `GPS Weak (${accuracy.toFixed(0)}m)`;
             return;
-        } else {
-            this.gpsText.textContent = 'GPS Aktivan';
         }
 
-        // Proveri distancu od poslednje prihvaćene tačke
+        // FILTER 2: Speed check (unrealistic jumps)
+        if (this.lastAcceptedPoint && this.lastPointTime) {
+            const distance = this.haversineDistance(
+                this.lastAcceptedPoint.lat,
+                this.lastAcceptedPoint.lon,
+                latitude,
+                longitude
+            );
+            const timeDiff = (Date.now() - this.lastPointTime) / 1000;
+            const speed = timeDiff > 0 ? distance / timeDiff : 0;
+
+            if (speed > this.maxRealisticSpeed) {
+                console.log(`❌ Speed unrealistic: ${speed.toFixed(1)} m/s`);
+                return;
+            }
+        }
+
+        // FILTER 3: Distance threshold
         if (this.lastAcceptedPoint) {
             const distance = this.haversineDistance(
                 this.lastAcceptedPoint.lat,
@@ -413,39 +438,69 @@ class DetektorTracker {
                 longitude
             );
 
-            // Ako si se pomerio manje od minDistance, ignoriši (stajanje na mestu)
-            if (distance < this.minDistanceMeters) {
-                // Ali ipak updateuj currentGPSPosition za precizne checkpointe
+            // Dynamic threshold based on accuracy
+            const threshold = accuracy < this.minAccuracyForInstantAccept 
+                ? this.minDistanceMeters * 0.5 
+                : this.minDistanceMeters;
+
+            if (distance < threshold) {
+                // Update smoothed position even if not adding point
+                this.updateSmoothedPosition(latitude, longitude);
                 return;
             }
-            
-            // Stvarno kretanje!
-            this.lastMovementTime = Date.now();
         }
 
-        // Postavi origin ako je prvi point
+        // FILTER 4: Apply Kalman-like smoothing
+        this.updateSmoothedPosition(latitude, longitude);
+        const finalLat = this.smoothedLat || latitude;
+        const finalLon = this.smoothedLon || longitude;
+
+        // Initialize origin
         if (this.trackPoints.length === 0) {
-            this.originLat = latitude;
-            this.originLon = longitude;
+            this.originLat = finalLat;
+            this.originLon = finalLon;
             this.offsetX = this.canvas.width / 2;
             this.offsetY = this.canvas.height / 2;
-            this.checkpointBtn.disabled = false; // omogući checkpoint dugme
+            this.checkpointBtn.disabled = false;
         }
 
-        // Dodaj point
+        // Add smoothed point
         const point = {
-            lat: latitude,
-            lon: longitude,
+            lat: finalLat,
+            lon: finalLon,
             accuracy: accuracy,
             timestamp: Date.now()
         };
 
         this.trackPoints.push(point);
         this.lastAcceptedPoint = point;
+        this.lastPointTime = Date.now();
+
+        console.log(`✅ GPS OK: ${accuracy.toFixed(1)}m`);
+        this.gpsText.textContent = `GPS Active (${accuracy.toFixed(0)}m)`;
 
         // Update UI
         this.updateDistance();
         this.draw();
+    }
+
+    updateSmoothedPosition(lat, lon) {
+        // Exponential moving average (simple Kalman filter)
+        if (this.smoothedLat === null) {
+            this.smoothedLat = lat;
+            this.smoothedLon = lon;
+        } else {
+            this.smoothedLat = this.smoothedLat * (1 - this.smoothingFactor) + lat * this.smoothingFactor;
+            this.smoothedLon = this.smoothedLon * (1 - this.smoothingFactor) + lon * this.smoothingFactor;
+        }
+
+        // Update current position with smoothed values
+        this.currentGPSPosition = {
+            lat: this.smoothedLat,
+            lon: this.smoothedLon,
+            accuracy: this.currentGPSPosition.accuracy,
+            timestamp: Date.now()
+        };
     }
 
     handleGPSError(error) {
