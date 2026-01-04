@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="sr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#2c3e50">
+    <title>Detektor Tracker</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="manifest" href="manifest.json">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <h1>Detektor Tracker</h1>
+            <div class="gps-status" id="gpsStatus">
+                <span class="gps-indicator"></span>
+                <span id="gpsText">GPS Neaktivan</span>
+            </div>
+        </header>
+
+        <!-- Info Banner (prikazuje se samo prvi put) -->
+        <div id="infoBanner" class="info-banner hidden">
+            <div class="info-content">
+                <strong>ℹ️ Važno:</strong> Browser će tražiti dozvolu za GPS. <strong>Odobri jednom</strong> i neće te više pitati.<br>
+                <small>Ako otvaraš preko file://, preporučujem: <code>python -m http.server 8000</code></small>
+            </div>
+            <button id="closeInfoBtn" class="btn-close-info">✕</button>
+        </div>
+
+        <!-- Mapa (Canvas) -->
+        <div class="map-container">
+            <canvas id="mapCanvas"></canvas>
+            <div class="map-info">
+                <div id="trackingInfo" class="tracking-info hidden">
+                    <span>📍 Pređeno: <strong id="distanceText">0m</strong></span>
+                    <span>⏱️ Vreme: <strong id="timeText">00:00</strong></span>
+                </div>
+                <div class="map-controls">
+                    <button id="centerMapBtn" class="btn-map" title="Centriraj mapu">🎯</button>
+                    <button id="zoomInBtn" class="btn-map" title="Zoom In">+</button>
+                    <button id="zoomOutBtn" class="btn-map" title="Zoom Out">−</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Kontrole -->
+        <div class="controls">
+            <button id="startBtn" class="btn btn-primary">
+                <span class="btn-icon">▶</span>
+                START
+            </button>
+            <button id="testModeBtn" class="btn btn-test" title="TEST MODE - simuliraj GPS za desktop">
+                <span class="btn-icon">🧪</span>
+                TEST MODE
+            </button>
+            <button id="checkpointBtn" class="btn btn-success hidden" disabled>
+                <span class="btn-icon">📍</span>
+                CHECKPOINT
+            </button>
+            <button id="stopBtn" class="btn btn-danger hidden">
+                <span class="btn-icon">⏹</span>
+                STOP
+            </button>
+        </div>
+
+        <!-- Lista Checkpointa -->
+        <div class="checkpoints-section">
+            <div class="section-header">
+                <h2>Mete / Checkpointi</h2>
+                <div class="export-controls">
+                    <button id="exportBtn" class="btn-small btn-export">📤 Export</button>
+                    <button id="importBtn" class="btn-small btn-import">📥 Import</button>
+                    <input type="file" id="importFile" accept=".json" style="display:none">
+                </div>
+            </div>
+            <div id="checkpointsList" class="checkpoints-list">
+                <p class="empty-state">Nema checkpointa. Klikni START i kreni sa detektorom.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal za kreiranje checkpointa -->
+    <div id="checkpointModal" class="modal hidden">
+        <div class="modal-content">
+            <h3>Nova Meta</h3>
+            <input type="text" id="checkpointName" placeholder="Opis (npr: gvozdeni predmet, srebrnjak...)" maxlength="100">
+            
+            <label>Jačina Signala</label>
+            <select id="checkpointSignal">
+                <option value="weak">Slab</option>
+                <option value="medium" selected>Srednji</option>
+                <option value="strong">Jak</option>
+                <option value="very-strong">Veoma Jak</option>
+            </select>
+
+            <label>Dubina (cm)</label>
+            <input type="number" id="checkpointDepth" placeholder="npr: 15" min="0" max="100">
+
+            <label>ID Range (npr: VDI 82-85)</label>
+            <input type="text" id="checkpointIDRange" placeholder="npr: VDI 82-85, TID 45" maxlength="50">
+
+            <label>Napomena (optional)</label>
+            <textarea id="checkpointNotes" placeholder="Dodatne napomene..." rows="2" maxlength="200"></textarea>
+
+            <div class="modal-actions">
+                <button id="saveCheckpointBtn" class="btn btn-success">Sačuvaj</button>
+                <button id="cancelCheckpointBtn" class="btn btn-secondary">Otkaži</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="db.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

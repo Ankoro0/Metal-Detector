@@ -1,0 +1,22 @@
+# Netlify Configuration
+[build]
+  publish = "."
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    # HTTPS only za GPS
+    Content-Security-Policy = "upgrade-insecure-requests"
+    
+    # Service Worker cache
+    Cache-Control = "public, max-age=31536000"
+    
+[[headers]]
+  for = "/service-worker.js"
+  [headers.values]
+    Cache-Control = "no-cache"
+
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "no-cache"
