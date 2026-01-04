@@ -28,6 +28,13 @@ class DetektorTracker {
         this.deviceHeading = null; // u radijanima - pravac telefona
         this.compassAvailable = false;
 
+        // Drag-to-pan
+        this.isDragging = false;
+        this.dragStartX = 0;
+        this.dragStartY = 0;
+        this.dragOffsetX = 0;
+        this.dragOffsetY = 0;
+
         // Canvas
         this.canvas = document.getElementById('mapCanvas');
         this.ctx = this.canvas.getContext('2d');
@@ -114,12 +121,24 @@ class DetektorTracker {
 
         // Inicijalizuj kompas (Device Orientation)
         this.initCompass();
+
+        // Drag-to-pan event listeneri
+        this.canvas.addEventListener('mousedown', (e) => this.onDragStart(e));
+        this.canvas.addEventListener('mousemove', (e) => this.onDragMove(e));
+        this.canvas.addEventListener('mouseup', () => this.onDragEnd());
+        this.canvas.addEventListener('mouseleave', () => this.onDragEnd());
+
+        // Touch support za mobilni
+        this.canvas.addEventListener('touchstart', (e) => this.onDragStart(e));
+        this.canvas.addEventListener('touchmove', (e) => this.onDragMove(e));
+        this.canvas.addEventListener('touchend', () => this.onDragEnd());
     }
 
     resizeCanvas() {
         const container = this.canvas.parentElement;
         this.canvas.width = container.clientWidth;
         this.canvas.height = container.clientHeight;
+        this.canvas.style.cursor = 'grab'; // drag cursor
         this.draw();
     }
 
@@ -165,6 +184,53 @@ class DetektorTracker {
                 this.draw();
             }
         });
+    }
+
+    // ===== DRAG TO PAN =====
+
+    onDragStart(event) {
+        const pos = this.getEventPosition(event);
+        this.isDragging = true;
+        this.dragStartX = pos.x - this.dragOffsetX;
+        this.dragStartY = pos.y - this.dragOffsetY;
+        this.canvas.style.cursor = 'grabbing';
+    }
+
+    onDragMove(event) {
+        if (!this.isDragging) return;
+        
+        const pos = this.getEventPosition(event);
+        this.dragOffsetX = pos.x - this.dragStartX;
+        this.dragOffsetY = pos.y - this.dragStartY;
+        
+        // Odmah update offset
+        this.offsetX = this.canvas.width / 2 + this.dragOffsetX;
+        this.offsetY = this.canvas.height / 2 + this.dragOffsetY;
+        
+        this.draw();
+    }
+
+    onDragEnd() {
+        this.isDragging = false;
+        this.canvas.style.cursor = 'grab';
+    }
+
+    getEventPosition(event) {
+        const rect = this.canvas.getBoundingClientRect();
+        
+        if (event.touches && event.touches.length > 0) {
+            // Touch event
+            return {
+                x: event.touches[0].clientX - rect.left,
+                y: event.touches[0].clientY - rect.top
+            };
+        } else {
+            // Mouse event
+            return {
+                x: event.clientX - rect.left,
+                y: event.clientY - rect.top
+            };
+        }
     }
 
     checkGPSAvailability() {
@@ -633,6 +699,103 @@ class DetektorTracker {
         return Math.atan2(y, x);
     }
 
+    // ===== PATHFINDING - Najkraći STVARNI put =====
+
+    findShortestWalkedPath(targetIndex) {
+        // Dijkstra algoritam - nađi najkraću kombinaciju stvarnih segmenata
+        if (targetIndex <= 0 || targetIndex >= this.trackPoints.length) {
+            return [0, targetIndex]; // direktno ako nema puta
+        }
+
+        const distances = new Array(this.trackPoints.length).fill(Infinity);
+        const previous = new Array(this.trackPoints.length).fill(null);
+        const visited = new Set();
+        
+        distances[0] = 0; // start sa 0 distance
+
+        // Failsafe: max iterations
+        let iterations = 0;
+        const maxIterations = this.trackPoints.length * 2;
+
+        while (visited.size < this.trackPoints.length && iterations < maxIterations) {
+            iterations++;
+            
+            // Nađi closest unvisited node
+            let minDist = Infinity;
+            let minIndex = -1;
+            
+            for (let i = 0; i < this.trackPoints.length; i++) {
+                if (!visited.has(i) && distances[i] < minDist) {
+                    minDist = distances[i];
+                    minIndex = i;
+                }
+            }
+
+            if (minIndex === -1 || minIndex === targetIndex) break;
+            
+            visited.add(minIndex);
+
+            // Update neighbors (proverimo sve tačke - možda smo se vratili)
+            for (let neighbor = 0; neighbor < this.trackPoints.length; neighbor++) {
+                if (visited.has(neighbor)) continue;
+                
+                // Distance između minIndex i neighbor
+                const dist = this.haversineDistance(
+                    this.trackPoints[minIndex].lat,
+                    this.trackPoints[minIndex].lon,
+                    this.trackPoints[neighbor].lat,
+                    this.trackPoints[neighbor].lon
+                );
+
+                // Ako su tačke blizu (< 20m za fleksibilnost), smatraj ih povezanim
+                if (dist < 20) {
+                    const newDist = distances[minIndex] + dist;
+                    
+                    if (newDist < distances[neighbor]) {
+                        distances[neighbor] = newDist;
+                        previous[neighbor] = minIndex;
+                    }
+                }
+            }
+        }
+
+        // Reconstruct path
+        const path = [];
+        let current = targetIndex;
+        
+        while (current !== null && path.length < this.trackPoints.length) {
+            path.unshift(current);
+            current = previous[current];
+            
+            // Failsafe: prevent infinite loop
+            if (path.length > this.trackPoints.length) {
+                console.warn('Pathfinding loop detected, falling back to direct path');
+                return this.getSimplifiedPath(targetIndex);
+            }
+        }
+
+        // FAILSAFE: ako pathfinding ne uspe, koristi pojednostavljen put
+        if (path.length === 0 || path[0] !== 0) {
+            console.warn('No valid path found, using simplified path');
+            return this.getSimplifiedPath(targetIndex);
+        }
+
+        return path;
+    }
+
+    getSimplifiedPath(targetIndex) {
+        // Fallback: uzmi svaki N-ti point za pojednostavljen put
+        const simplifiedPath = [0]; // start
+        const step = Math.max(1, Math.floor(targetIndex / 10)); // max 10 segmenata
+        
+        for (let i = step; i < targetIndex; i += step) {
+            simplifiedPath.push(i);
+        }
+        
+        simplifiedPath.push(targetIndex); // kraj
+        return simplifiedPath;
+    }
+
     updateDistance() {
         const distance = this.calculateTotalDistance();
         this.distanceText.textContent = distance > 1000 
@@ -701,49 +864,41 @@ class DetektorTracker {
             return;
         }
 
-        // Crta putanju (track)
-        if (this.trackPoints.length > 1) {
-            ctx.strokeStyle = '#3498db';
-            ctx.lineWidth = 3;
-            ctx.lineCap = 'round';
-            ctx.lineJoin = 'round';
-            ctx.beginPath();
+        // NE crtaj plavu track liniju - samo prati u pozadini!
+        // Track se koristi samo za pathfinding do checkpointa
 
-            const firstPoint = this.latLonToCanvas(this.trackPoints[0].lat, this.trackPoints[0].lon);
-            ctx.moveTo(firstPoint.x, firstPoint.y);
-
-            for (let i = 1; i < this.trackPoints.length; i++) {
-                const point = this.latLonToCanvas(this.trackPoints[i].lat, this.trackPoints[i].lon);
-                ctx.lineTo(point.x, point.y);
-            }
-
-            ctx.stroke();
-        }
-
-        // Crta checkpointe
+        // Crta checkpointe sa NAJKRAĆOM STVARNOM RUTOM
         this.checkpoints.forEach((cp, index) => {
             const point = this.latLonToCanvas(cp.lat, cp.lon);
             
-            // Putanja do checkpointa (koristi trackIndex umesto kopije path-a)
+            // Nađi najkraći STVARNI put od START do checkpointa
             if (cp.trackIndex !== undefined && cp.trackIndex > 0) {
                 const isHighlighted = this.highlightedCheckpoint === cp.id;
+                const path = this.findShortestWalkedPath(cp.trackIndex);
                 
                 ctx.strokeStyle = isHighlighted ? '#f39c12' : (cp.status === 'DUG' ? '#95a5a6' : '#2ecc71');
-                ctx.lineWidth = isHighlighted ? 4 : 2;
-                ctx.setLineDash(isHighlighted ? [] : [5, 5]);
+                ctx.lineWidth = isHighlighted ? 4 : 3;
+                ctx.setLineDash([]);
                 ctx.beginPath();
 
-                const firstPathPoint = this.latLonToCanvas(this.trackPoints[0].lat, this.trackPoints[0].lon);
-                ctx.moveTo(firstPathPoint.x, firstPathPoint.y);
+                // Crta optimizovanu rutu
+                if (path.length > 0) {
+                    const firstPoint = this.latLonToCanvas(
+                        this.trackPoints[path[0]].lat,
+                        this.trackPoints[path[0]].lon
+                    );
+                    ctx.moveTo(firstPoint.x, firstPoint.y);
 
-                // Crta liniju od starta do trackIndex-a
-                for (let i = 1; i <= cp.trackIndex && i < this.trackPoints.length; i++) {
-                    const pathPoint = this.latLonToCanvas(this.trackPoints[i].lat, this.trackPoints[i].lon);
-                    ctx.lineTo(pathPoint.x, pathPoint.y);
+                    for (let i = 1; i < path.length; i++) {
+                        const pathPoint = this.latLonToCanvas(
+                            this.trackPoints[path[i]].lat,
+                            this.trackPoints[path[i]].lon
+                        );
+                        ctx.lineTo(pathPoint.x, pathPoint.y);
+                    }
                 }
 
                 ctx.stroke();
-                ctx.setLineDash([]);
             }
 
             // Checkpoint marker - različite boje po statusu
