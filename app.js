@@ -18,7 +18,7 @@ class DetektorTracker {
         this.minDistanceMeters = 5; // minimum distance
         this.maxAccuracyMeters = 40; // maximum acceptable accuracy
         this.minIntervalSeconds = 2; // minimum time between points
-        this.maxSpeedMps = 100; // 100 m/s = 360 km/h (unrealistic for walking)
+        this.maxSpeedMps = 15; // 15 m/s = 54 km/h (realistično za terensko kretanje)
         this.gpsSettlingTime = 3000; // 3s initial settling
         
         // Stationary detection buffer
@@ -43,6 +43,9 @@ class DetektorTracker {
         // Device Orientation (kompas)
         this.deviceHeading = null; // u radijanima - pravac telefona
         this.compassAvailable = false;
+
+        // Geocoding cache (Nominatim rate limit protection)
+        this.geocodingCache = new Map();
 
         // Drag-to-pan
         this.isDragging = false;
@@ -507,34 +510,45 @@ class DetektorTracker {
         this.gpsText.textContent = `GPS Active (${accuracy.toFixed(0)}m)`;
 
         this.updateDistance();
-        this.draw();
+        requestAnimationFrame(() => this.draw());
     }
 
     isStationary() {
         // Proveri da li si u krugu stationaryRadius poslednjih N tačaka
         if (this.recentPoints.length < 5) return false;
 
-        // Izračunaj centroid (prosek) poslednjih tačaka
+        // Izračunaj centroid (prosek) poslednjih tačaka - KORISTI SMOOTHED!
         let sumLat = 0, sumLon = 0;
         this.recentPoints.forEach(p => {
-            sumLat += p.lat;
-            sumLon += p.lon;
+            // Koristi smoothed pozicije ako postoje, inače raw
+            const lat = this.smoothedLat ?? p.lat;
+            const lon = this.smoothedLon ?? p.lon;
+            sumLat += lat;
+            sumLon += lon;
         });
         const centerLat = sumLat / this.recentPoints.length;
         const centerLon = sumLon / this.recentPoints.length;
 
-        // Proveri da li su SVE tačke u krugu stationaryRadius od centroida
+        // Proveri da li su SVE tačke u krugu od centroida
         let maxDist = 0;
         for (let p of this.recentPoints) {
-            const dist = this.haversineDistance(centerLat, centerLon, p.lat, p.lon);
+            const lat = this.smoothedLat ?? p.lat;
+            const lon = this.smoothedLon ?? p.lon;
+            const dist = this.haversineDistance(centerLat, centerLon, lat, lon);
             if (dist > maxDist) maxDist = dist;
         }
 
-        // DEBUG: prikaži radius check
-        console.log(`📍 Stationary check: maxDist=${maxDist.toFixed(1)}m, threshold=${this.stationaryRadiusMeters}m`);
+        // DINAMIČNI RADIUS: prilagodi accuracy-ju (ChatGPT suggestion!)
+        const dynamicRadius = Math.max(
+            this.stationaryRadiusMeters,
+            this.currentGPSPosition?.accuracy ?? 0
+        );
 
-        // Ako je najdalja tačka < stationaryRadius, stojiš!
-        return maxDist < this.stationaryRadiusMeters;
+        // DEBUG: prikaži radius check
+        console.log(`📍 Stationary: maxDist=${maxDist.toFixed(1)}m, threshold=${dynamicRadius.toFixed(1)}m`);
+
+        // Ako je najdalja tačka < radius, stojiš!
+        return maxDist < dynamicRadius;
     }
 
     updateSmoothedPosition(lat, lon) {
@@ -1212,6 +1226,13 @@ class DetektorTracker {
                     let locationName = `${cp.lat.toFixed(6)}, ${cp.lon.toFixed(6)}`;
                     let terrainType = '';
                     
+                    // CACHE CHECK (Nominatim rate limit protection)
+                    const cacheKey = `${cp.lat.toFixed(4)},${cp.lon.toFixed(4)}`;
+                    if (this.geocodingCache.has(cacheKey)) {
+                        const cached = this.geocodingCache.get(cacheKey);
+                        return { ...cp, locationName: cached.locationName, terrainType: cached.terrainType };
+                    }
+                    
                     try {
                         // Nominatim API (OpenStreetMap) - DETALJNI podaci
                         const response = await fetch(
@@ -1261,6 +1282,9 @@ class DetektorTracker {
                     } catch (err) {
                         console.log('Reverse geocoding failed, using coordinates');
                     }
+                    
+                    // Sačuvaj u cache
+                    this.geocodingCache.set(cacheKey, { locationName, terrainType });
                     
                     return { ...cp, locationName, terrainType };
                 })
