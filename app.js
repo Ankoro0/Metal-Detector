@@ -24,6 +24,10 @@ class DetektorTracker {
         // Highlighted checkpoint za navigaciju
         this.highlightedCheckpoint = null;
 
+        // Device Orientation (kompas)
+        this.deviceHeading = null; // u radijanima - pravac telefona
+        this.compassAvailable = false;
+
         // Canvas
         this.canvas = document.getElementById('mapCanvas');
         this.ctx = this.canvas.getContext('2d');
@@ -107,6 +111,9 @@ class DetektorTracker {
 
         // Prikaži info banner ako korisnik prvi put pokreće app
         this.showInfoBannerIfFirstTime();
+
+        // Inicijalizuj kompas (Device Orientation)
+        this.initCompass();
     }
 
     resizeCanvas() {
@@ -114,6 +121,50 @@ class DetektorTracker {
         this.canvas.width = container.clientWidth;
         this.canvas.height = container.clientHeight;
         this.draw();
+    }
+
+    async initCompass() {
+        // Proveri da li je kompas dostupan
+        if (!window.DeviceOrientationEvent) {
+            console.log('Device Orientation nije dostupan');
+            return;
+        }
+
+        // iOS 13+ zahteva permission
+        if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+            try {
+                const permission = await DeviceOrientationEvent.requestPermission();
+                if (permission === 'granted') {
+                    this.compassAvailable = true;
+                    this.startCompass();
+                }
+            } catch (error) {
+                console.log('Kompas permission odbijen:', error);
+            }
+        } else {
+            // Android ili stariji iOS
+            this.compassAvailable = true;
+            this.startCompass();
+        }
+    }
+
+    startCompass() {
+        window.addEventListener('deviceorientationabsolute', (event) => {
+            if (event.alpha !== null) {
+                // alpha je kompas heading (0-360°, 0=sever)
+                // Konvertuj u radijane i invertiraj (jer canvas radi suprotno)
+                this.deviceHeading = -(event.alpha * Math.PI / 180);
+                this.draw(); // refresh canvas sa novim heading-om
+            }
+        });
+
+        // Fallback za browsere koji nemaju deviceorientationabsolute
+        window.addEventListener('deviceorientation', (event) => {
+            if (event.alpha !== null && this.deviceHeading === null) {
+                this.deviceHeading = -(event.alpha * Math.PI / 180);
+                this.draw();
+            }
+        });
     }
 
     checkGPSAvailability() {
@@ -569,6 +620,19 @@ class DetektorTracker {
         return R * c;
     }
 
+    calculateBearing(lat1, lon1, lat2, lon2) {
+        // Vraća bearing (pravac) u radijanima
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const lat1Rad = lat1 * Math.PI / 180;
+        const lat2Rad = lat2 * Math.PI / 180;
+        
+        const y = Math.sin(dLon) * Math.cos(lat2Rad);
+        const x = Math.cos(lat1Rad) * Math.sin(lat2Rad) -
+                  Math.sin(lat1Rad) * Math.cos(lat2Rad) * Math.cos(dLon);
+        
+        return Math.atan2(y, x);
+    }
+
     updateDistance() {
         const distance = this.calculateTotalDistance();
         this.distanceText.textContent = distance > 1000 
@@ -703,7 +767,7 @@ class DetektorTracker {
             ctx.fillText((index + 1).toString(), point.x, point.y);
         });
 
-        // Trenutna pozicija (pulsira)
+        // Trenutna pozicija (pulsira) sa strelicom pravca
         if (this.isTracking && this.trackPoints.length > 0) {
             const current = this.trackPoints[this.trackPoints.length - 1];
             const point = this.latLonToCanvas(current.lat, current.lon);
@@ -724,6 +788,36 @@ class DetektorTracker {
             ctx.strokeStyle = 'white';
             ctx.lineWidth = 2;
             ctx.stroke();
+
+            // KOMPAS STRELICA (pravac telefona)
+            if (this.deviceHeading !== null) {
+                ctx.save();
+                ctx.translate(point.x, point.y);
+                ctx.rotate(this.deviceHeading);
+                
+                // Trougao strelica (SEVER - gore)
+                ctx.fillStyle = '#e74c3c'; // crvena strelica
+                ctx.beginPath();
+                ctx.moveTo(0, -15); // vrh
+                ctx.lineTo(-6, 3);  // levo
+                ctx.lineTo(6, 3);   // desno
+                ctx.closePath();
+                ctx.fill();
+                
+                // Beli okvir
+                ctx.strokeStyle = 'white';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                
+                ctx.restore();
+            } else {
+                // Ako nema kompasa, prikaži N (north) iznad kruga
+                ctx.fillStyle = '#95a5a6';
+                ctx.font = 'bold 14px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('N', point.x, point.y - 25);
+            }
         }
 
         // Start pozicija

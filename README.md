@@ -1,108 +1,74 @@
-# Detektor Tracker
+# 📍 Detektor Tracker
 
 **Offline GPS tracker za detektoriste** - prati kretanje, beleži checkpointe, čuva putanje.
 
----
-
-## 🎯 Šta radi?
-
-- **START** → pokreće GPS tracking i crta tvoje kretanje na sivoj mapi
-- **CHECKPOINT** → beleži metu sa opisom i putanjom do nje
-- **ISKOPANO** → označava checkpoint kao "DUG" (ali čuva putanju)
-- **100% OFFLINE** → svi podaci se čuvaju lokalno (IndexedDB)
+🔗 **Live Demo:** [your-app.netlify.app](#) *(dodaj link nakon deploya)*
 
 ---
 
-## 🚀 Kako koristiti?
+## 🎯 Funkcije
 
-### 1️⃣ Na TELEFONU (pravi GPS):
+✅ **GPS Tracking** - prati tvoje kretanje u realnom vremenu  
+✅ **Checkpointi** - beleži mete sa opisom, signalom, dubinom, ID range-om  
+✅ **4 Statusa** - ACTIVE, ISKOPANO, IGNORISANO, PROVERI OPET  
+✅ **100% Offline** - radi bez interneta (IndexedDB + Service Worker)  
+✅ **Export/Import** - backup podataka u JSON formatu  
+✅ **PWA** - instalira se kao aplikacija na telefonu  
+✅ **Minimalistička mapa** - siva podloga, bez nepotrebnih detalja  
 
-1. Otvori `index.html` u Chrome/Safari
+---
+
+## 🚀 Kako koristiti
+
+### **Na telefonu:**
+1. Otvori link u Chrome/Safari
 2. Dozvoli pristup lokaciji
 3. Klikni **START** i kreni sa detektorom
-4. Kad pronađeš metu → **CHECKPOINT** → upiši opis
-5. **STOP** kad završiš teren
+4. Kad pronađeš signal → **CHECKPOINT** → unesi podatke
+5. **STOP** kad završiš
 
-### 2️⃣ Na WINDOWS-u (testiranje):
-
-```powershell
-# Pokreni lokalni server (iz foldera sa aplikacijom)
-python -m http.server 8000
-```
-
-Pa otvori: `http://localhost:8000`
-
-*Napomena: Windows nema GPS, ali možeš testirati UI.*
+### **Desktop testiranje:**
+Klikni **🧪 TEST MODE** da simuliraš GPS.
 
 ---
 
-## 📁 Struktura
+## 📱 Instalacija kao App
 
-```
-/App za Detektor
-├── index.html           # UI
-├── style.css            # Dizajn (minimalistički)
-├── app.js               # Glavna logika
-├── db.js                # IndexedDB storage
-├── service-worker.js    # Offline rad
-├── manifest.json        # PWA konfiguracija
-└── README.md            # Ovo
-```
+**Android (Chrome):**
+- Meni → "Add to Home Screen"
+
+**iOS (Safari):**
+- Share → "Add to Home Screen"
 
 ---
 
-## 🔑 Ključne funkcije
+## 💾 Backup podataka
 
-✅ **Neutralna mapa** - siva podloga, bez Google Maps detalja  
-✅ **Track-based navigacija** - pamti SAMO gde si ti prošao  
-✅ **Checkpointi** - svaki ima svoju putanju od starta  
-✅ **Status: ACTIVE/DUG** - iskopane mete ostaju sive  
-✅ **Offline** - radi bez interneta  
-✅ **Responzivno** - Windows i mobilni  
-
----
-
-## 🧪 Testiranje
-
-1. Otvori DevTools (F12)
-2. Sensors → Location → Custom location
-3. Unesi lat/lon koordinate
-4. Testuj tracking
-
----
-
-## 📱 PWA (Progressive Web App)
-
-Možeš **instalirati** kao aplikaciju:
-
-- Chrome (Android/Desktop): Meni → "Install app"
-- Safari (iOS): Share → "Add to Home Screen"
+- **Export** → JSON fajl (čuva sve checkpointe + GPS track)
+- **Import** → učitaj nazad ili podeli sa drugima
 
 ---
 
 ## 🛠️ Tehnologije
 
-- **HTML5 Canvas** za crtanje mape
-- **Geolocation API** za GPS tracking
-- **IndexedDB** za lokalni storage
-- **Service Worker** za offline
-- **Vanilla JavaScript** (bez framework-a)
+- HTML5 Canvas (mapa)
+- Geolocation API (GPS)
+- IndexedDB (offline storage)
+- Service Worker (offline rad)
+- PWA (instalacija)
 
 ---
 
-## 💡 Kako radi logika?
+## 📊 Za AI analizu
 
-```
-START → prati GPS tačke → crta liniju
-       ↓
-CHECKPOINT → zapamti trenutnu poziciju + CELU putanju do sad
-       ↓
-DRUGI CHECKPOINT → nova linija od starta (ili prethodnog)
-       ↓
-ISKOPANO → status → DUG, ali putanja ostaje u bazi
-```
+Exportovani JSON sadrži strukturirane podatke:
+- GPS track (sve tačke)
+- Checkpointi sa signalom, dubinom, ID range-om
+- Statusi i vremenski pečati
+
+Šalji JSON AI-ju za pattern matching i predikcije!
 
 ---
 
-**Napravio:** GitHub Copilot (Claude Sonnet 4.5)  
-**Za:** Detektoriste koji hoće alat, a ne igračku 🔥
+**Made with 🔥 by GitHub Copilot (Claude Sonnet 4.5)**
+
