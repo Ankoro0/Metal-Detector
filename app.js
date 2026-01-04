@@ -24,7 +24,7 @@ class DetektorTracker {
         // Stationary detection buffer
         this.recentPoints = [];
         this.stationaryCheckCount = 10;
-        this.stationaryRadiusMeters = 15;
+        this.stationaryRadiusMeters = 8; // SMANJENO - sobna šetnja > 8m = krećeš se
         
         // Kalman smoothing
         this.smoothedLat = null;
@@ -527,6 +527,9 @@ class DetektorTracker {
             const dist = this.haversineDistance(centerLat, centerLon, p.lat, p.lon);
             if (dist > maxDist) maxDist = dist;
         }
+
+        // DEBUG: prikaži radius check
+        console.log(`📍 Stationary check: maxDist=${maxDist.toFixed(1)}m, threshold=${this.stationaryRadiusMeters}m`);
 
         // Ako je najdalja tačka < stationaryRadius, stojiš!
         return maxDist < this.stationaryRadiusMeters;
