@@ -165,6 +165,42 @@ class DetektorDB {
             request.onerror = () => reject(request.error);
         });
     }
+
+    async deleteSession(sessionId) {
+        return new Promise((resolve, reject) => {
+            const transaction = this.db.transaction(['sessions', 'checkpoints', 'tracks'], 'readwrite');
+            
+            // Obriši session
+            transaction.objectStore('sessions').delete(sessionId);
+            
+            // Obriši sve checkpointe te sesije
+            const checkpointStore = transaction.objectStore('checkpoints');
+            const checkpointIndex = checkpointStore.index('sessionId');
+            const checkpointRequest = checkpointIndex.openCursor(IDBKeyRange.only(sessionId));
+            checkpointRequest.onsuccess = (e) => {
+                const cursor = e.target.result;
+                if (cursor) {
+                    cursor.delete();
+                    cursor.continue();
+                }
+            };
+            
+            // Obriši sve track pointe te sesije
+            const trackStore = transaction.objectStore('tracks');
+            const trackIndex = trackStore.index('sessionId');
+            const trackRequest = trackIndex.openCursor(IDBKeyRange.only(sessionId));
+            trackRequest.onsuccess = (e) => {
+                const cursor = e.target.result;
+                if (cursor) {
+                    cursor.delete();
+                    cursor.continue();
+                }
+            };
+            
+            transaction.oncomplete = () => resolve();
+            transaction.onerror = () => reject(transaction.error);
+        });
+    }
 }
 
 // Export instance

@@ -98,6 +98,7 @@ class DetektorTracker {
         // Session management
         this.sessionSelect = document.getElementById('sessionSelect');
         this.newSessionBtn = document.getElementById('newSessionBtn');
+        this.deleteSessionBtn = document.getElementById('deleteSessionBtn');
 
         // Info banner
         this.infoBanner = document.getElementById('infoBanner');
@@ -136,6 +137,7 @@ class DetektorTracker {
         // Session management
         this.sessionSelect.addEventListener('change', (e) => this.switchSession(e.target.value));
         this.newSessionBtn.addEventListener('click', () => this.createNewSession());
+        this.deleteSessionBtn.addEventListener('click', () => this.deleteCurrentSession());
 
         // Info banner
         this.closeInfoBtn.addEventListener('click', () => this.closeInfoBanner());
@@ -381,6 +383,36 @@ class DetektorTracker {
         this.draw();
         
         alert(`✅ Sesija "${name}" kreirana!`);
+    }
+
+    async deleteCurrentSession() {
+        if (!this.currentSession) {
+            alert('❌ Nema aktivne sesije za brisanje!');
+            return;
+        }
+
+        const sessions = await detektorDB.getAllSessions();
+        const session = sessions.find(s => s.id === this.currentSession);
+        
+        if (!confirm(`Da li sigurno želiš obrisati sesiju "${session?.name || 'Nepoznata'}"?`)) {
+            return;
+        }
+
+        // Obriši session iz DB
+        await detektorDB.deleteSession(this.currentSession);
+        
+        // Očisti current session
+        this.currentSession = null;
+        this.trackPoints = [];
+        this.checkpoints = [];
+        
+        // Refresh dropdown
+        await this.loadSessions();
+        
+        // Učitaj poslednju preostalu sesiju (ako postoji)
+        await this.loadLastSession();
+        
+        alert('✅ Sesija obrisana!');
     }
 
     // ===== TRACKING =====
