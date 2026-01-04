@@ -286,13 +286,14 @@ class DetektorTracker {
     // ===== SESSION MANAGEMENT =====
 
     async loadSessions() {
+        console.log('🔄 SESSION MANAGEMENT v2.0 - Upload successful!');
         const sessions = await detektorDB.getAllSessions();
         
         // Sortiraj po datumu (najnovije prvo)
         sessions.sort((a, b) => b.startTime - a.startTime);
         
         // Popuni dropdown
-        this.sessionSelect.innerHTML = '<option value="">-- Nova Sesija --</option>';
+        this.sessionSelect.innerHTML = '<option value="">-- New Session --</option>';
         sessions.forEach(session => {
             const option = document.createElement('option');
             option.value = session.id;
