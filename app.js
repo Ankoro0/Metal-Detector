@@ -1320,12 +1320,20 @@ class DetektorTracker {
         });
 
         prompt += `\n` + `=`.repeat(50) + `\n\n`;
+        prompt += `INFORMACIJE O OPREMI:\n`;
+        prompt += `- Detektor: Minelab X-Terra Pro\n`;
+        prompt += `- Dubinski indikator: Grubo precizan (pretpostavlja meta veličine novčića)\n`;
+        prompt += `  • Velike mete: Mogu biti dublje nego što pokazuje (jak signal vara detektor)\n`;
+        prompt += `  • Sitne mete: Mogu biti plići nego što pokazuje (slab signal)\n`;
+        prompt += `  • Indikator je RELATIVAN, ne apsolutno tačan!\n\n`;
+        prompt += `=`.repeat(50) + `\n\n`;
         prompt += `MOLIM TE ANALIZIRAJ:\n`;
+        prompt += `VAŽNO: Prvo pronađi na webu dokumentaciju za "X-Terra Pro Minelab" da razumeš VID signale i specifikacije.\n\n`;
         prompt += `1. Kakva je istorija ovog područja?\n`;
         prompt += `2. Da li je ovo dobar teren za metal detektor?\n`;
-        prompt += `3. Šta mogu očekivati da nađem na osnovu VID signala?\n`;
+        prompt += `3. Šta mogu očekivati da nađem na osnovu VID signala (konsultuj X-Terra Pro VID tabelu)?\n`;
         prompt += `4. Da li vredi nastaviti pretragu ovde?\n`;
-        prompt += `5. Kakve su to mete po ID rasponu i dubini?\n`;
+        prompt += `5. Kakve su to mete po ID rasponu i dubini (uzmi u obzir ograničenja dubinskog indikatora)?\n`;
 
         return prompt;
     }
