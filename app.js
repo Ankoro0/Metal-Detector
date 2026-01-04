@@ -89,6 +89,7 @@ class DetektorTracker {
         this.exportBtn = document.getElementById('exportBtn');
         this.importBtn = document.getElementById('importBtn');
         this.importFile = document.getElementById('importFile');
+        this.copyAIBtn = document.getElementById('copyAIBtn');
 
         // Info banner
         this.infoBanner = document.getElementById('infoBanner');
@@ -122,6 +123,7 @@ class DetektorTracker {
         this.exportBtn.addEventListener('click', () => this.exportData());
         this.importBtn.addEventListener('click', () => this.importFile.click());
         this.importFile.addEventListener('change', (e) => this.importData(e));
+        this.copyAIBtn.addEventListener('click', () => this.copyForAI());
 
         // Info banner
         this.closeInfoBtn.addEventListener('click', () => this.closeInfoBanner());
@@ -1189,6 +1191,143 @@ class DetektorTracker {
             this.scale = newScale;
             this.draw();
         }
+    }
+
+    // ===== COPY FOR AI =====
+
+    async copyForAI() {
+        if (this.checkpoints.length === 0) {
+            alert('Nema checkpointa za analizu!');
+            return;
+        }
+
+        // Prikaži loading
+        this.copyAIBtn.disabled = true;
+        this.copyAIBtn.textContent = '⏳ Priprema...';
+
+        try {
+            // Reverse geocoding za svaki checkpoint (ako ima net)
+            const checkpointsWithLocation = await Promise.all(
+                this.checkpoints.map(async (cp) => {
+                    let locationName = `${cp.lat.toFixed(6)}, ${cp.lon.toFixed(6)}`;
+                    let terrainType = '';
+                    
+                    try {
+                        // Nominatim API (OpenStreetMap) - DETALJNI podaci
+                        const response = await fetch(
+                            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${cp.lat}&lon=${cp.lon}&accept-language=sr&addressdetails=1&extratags=1`,
+                            { headers: { 'User-Agent': 'DetektorTracker/1.0' } }
+                        );
+                        
+                        if (response.ok) {
+                            const data = await response.json();
+                            
+                            // Parsiraj detaljnu lokaciju
+                            const address = data.address || {};
+                            const parts = [];
+                            
+                            // Dodaj naselje/selo
+                            if (address.village) parts.push(address.village);
+                            else if (address.suburb) parts.push(address.suburb);
+                            else if (address.hamlet) parts.push(address.hamlet);
+                            else if (address.neighbourhood) parts.push(address.neighbourhood);
+                            
+                            // Dodaj grad
+                            if (address.city) parts.push(address.city);
+                            else if (address.town) parts.push(address.town);
+                            
+                            // Dodaj državu
+                            if (address.country) parts.push(address.country);
+                            
+                            locationName = parts.length > 0 ? parts.join(', ') : data.display_name || locationName;
+                            
+                            // TIP TERENA (ključno za detektor!)
+                            const landuse = data.extratags?.landuse || data.extratags?.natural;
+                            if (landuse) {
+                                const terrainMap = {
+                                    'forest': 'šumsko područje',
+                                    'wood': 'šuma',
+                                    'farmland': 'poljoprivredno zemljište',
+                                    'meadow': 'livada',
+                                    'grassland': 'travnato područje',
+                                    'residential': 'stambeno područje',
+                                    'military': 'vojno područje',
+                                    'cemetery': 'groblje',
+                                    'park': 'park'
+                                };
+                                terrainType = terrainMap[landuse] || landuse;
+                            }
+                        }
+                    } catch (err) {
+                        console.log('Reverse geocoding failed, using coordinates');
+                    }
+                    
+                    return { ...cp, locationName, terrainType };
+                })
+            );
+
+            // Generiši AI prompt
+            const prompt = this.generateAIPrompt(checkpointsWithLocation);
+
+            // Kopiraj u clipboard
+            await navigator.clipboard.writeText(prompt);
+
+            alert('✅ Kopirano! Zalepi u ChatGPT za analizu.');
+        } catch (error) {
+            console.error('Copy error:', error);
+            alert('❌ Greška pri kopiranju. Proveri net konekciju.');
+        } finally {
+            this.copyAIBtn.disabled = false;
+            this.copyAIBtn.textContent = '🤖 Copy for AI';
+        }
+    }
+
+    generateAIPrompt(checkpoints) {
+        const date = new Date().toLocaleDateString('sr-RS');
+        const totalDistance = this.calculateTotalDistance();
+
+        let prompt = `ANALIZA TERENA ZA METAL DETEKTOR\n`;
+        prompt += `=`.repeat(50) + `\n\n`;
+        prompt += `Datum: ${date}\n`;
+        prompt += `Ukupna distanca: ${totalDistance.toFixed(0)}m\n`;
+        prompt += `Broj checkpointa: ${checkpoints.length}\n\n`;
+
+        prompt += `CHECKPOINT MAPE:\n`;
+        prompt += `-`.repeat(50) + `\n\n`;
+
+        checkpoints.forEach((cp, index) => {
+            const statusEmoji = {
+                'ACTIVE': '📍',
+                'DUG': '✅',
+                'IGNORED': '❌',
+                'RECHECK': '🔄'
+            };
+
+            prompt += `${index + 1}. ${statusEmoji[cp.status]} ${cp.name}\n`;
+            prompt += `   Lokacija: ${cp.locationName}\n`;
+            if (cp.terrainType) {
+                prompt += `   Teren: ${cp.terrainType}\n`;
+            }
+            prompt += `   GPS: ${cp.lat.toFixed(6)}, ${cp.lon.toFixed(6)}\n`;
+            prompt += `   Signal (VID): ${cp.idRange || 'N/A'}\n`;
+            prompt += `   Jačina: ${this.getSignalLabel(cp.signalStrength)}\n`;
+            prompt += `   Dubina: ${cp.depth ? cp.depth + 'cm' : 'N/A'}\n`;
+            prompt += `   Distanca od starta: ${cp.distanceFromStart.toFixed(0)}m\n`;
+            if (cp.notes) {
+                prompt += `   Napomena: ${cp.notes}\n`;
+            }
+            prompt += `\n`;
+        });
+
+        prompt += `\n` + `=`.repeat(50) + `\n\n`;
+        prompt += `MOLIM TE ANALIZIRAJ:\n`;
+        prompt += `1. Kakva je istorija ovog područja?\n`;
+        prompt += `2. Da li je ovo dobar teren za metal detektor?\n`;
+        prompt += `3. Šta mogu očekivati da nađem na osnovu VID signala?\n`;
+        prompt += `4. Da li vredi nastaviti pretragu ovde?\n`;
+        prompt += `5. Kakve su to mete po ID rasponu i dubini?\n`;
+
+        return prompt;
     }
 
     // ===== EXPORT / IMPORT =====

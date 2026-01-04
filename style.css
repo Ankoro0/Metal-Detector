@@ -317,6 +317,21 @@ body {
     background: #8e44ad;
 }
 
+.btn-ai {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    font-weight: bold;
+}
+
+.btn-ai:hover {
+    background: linear-gradient(135deg, #5568d3 0%, #6a3f8f 100%);
+}
+
+.btn-ai:disabled {
+    opacity: 0.6;
+    cursor: wait;
+}
+
 .checkpoints-list {
     display: flex;
     flex-direction: column;
