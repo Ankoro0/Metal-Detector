@@ -10,26 +10,35 @@ class DetektorTracker {
         this.startTime = null;
         this.timerInterval = null;
 
-        // GPS Filtering - profesionalni algoritam
+        // GPS Filtering - ANTI-DRIFT sistem
         this.lastAcceptedPoint = null;
         this.currentGPSPosition = null;
-        this.gpsBuffer = []; // buffer poslednjih N tačaka za averaging
-        this.gpsBufferSize = 5;
+        this.gpsBuffer = []; // buffer za stationary detection
+        this.gpsBufferSize = 10; // poslednjih 10 GPS čitanja
         
-        // Dinamički filtering parametri
-        this.minDistanceMeters = 8; // minimum movement threshold
-        this.maxAccuracyMeters = 50; // reject poor signals
-        this.minAccuracyForInstantAccept = 10; // excellent GPS - accept immediately
-        this.gpsSettlingTime = 5000; // initial settling period
+        // Parametri
+        this.minDistanceMeters = 5; // minimum kad se STVARNO krećeš
+        this.maxAccuracyMeters = 50;
+        this.minAccuracyForInstantAccept = 10;
+        this.gpsSettlingTime = 5000;
         
-        // Speed-based filtering
-        this.maxRealisticSpeed = 10; // 10 m/s = 36 km/h (impossible on foot)
+        // STATIONARY DETECTION - KLJUČ ZA ANTI-DRIFT!
+        this.stationaryRadiusMeters = 15; // ako si u krugu 15m = stojiš
+        this.stationaryMinTime = 8000; // proveri poslednjih 8s
+        this.isStationary = false;
+        
+        // Speed filtering
+        this.maxRealisticSpeed = 10;
         this.lastPointTime = null;
         
-        // Kalman-like smoothing
+        // Stationary detection buffer
+        this.recentPoints = [];
+        this.stationaryCheckCount = 10; // proveri poslednjih 10 tačaka
+        
+        // Kalman smoothing
         this.smoothedLat = null;
         this.smoothedLon = null;
-        this.smoothingFactor = 0.3; // 0-1, lower = more smoothing
+        this.smoothingFactor = 0.3;
 
         // TEST MODE - simulirani GPS za desktop testiranje
         this.testMode = false;
@@ -398,6 +407,12 @@ class DetektorTracker {
             timestamp: Date.now()
         };
 
+        // Dodaj u recent points buffer za stationary detection
+        this.recentPoints.push({lat: latitude, lon: longitude, time: Date.now()});
+        if (this.recentPoints.length > this.stationaryCheckCount) {
+            this.recentPoints.shift();
+        }
+
         // FILTER 0: Settling period
         const timeSinceStart = Date.now() - this.startTime;
         if (timeSinceStart < this.gpsSettlingTime && this.trackPoints.length === 0) {
@@ -412,7 +427,25 @@ class DetektorTracker {
             return;
         }
 
-        // FILTER 2: Speed check (unrealistic jumps)
+        // FILTER 2: Time threshold - mora proći dovoljno vremena
+        if (this.lastPointTime) {
+            const timeSinceLastPoint = Date.now() - this.lastPointTime;
+            if (timeSinceLastPoint < this.minTimeBetweenPoints) {
+                // Update smoothed position but don't add point
+                this.updateSmoothedPosition(latitude, longitude);
+                return;
+            }
+        }
+
+        // FILTER 3: STATIONARY DETECTION - AKO STOJIŠ, NE DODAVAJ!
+        if (this.isStationary()) {
+            console.log('🚧 Stationary detected - ignoring GPS drift');
+            this.gpsText.textContent = 'GPS Active (standing)';
+            this.updateSmoothedPosition(latitude, longitude);
+            return;
+        }
+
+        // FILTER 4: Speed check (unrealistic jumps)
         if (this.lastAcceptedPoint && this.lastPointTime) {
             const distance = this.haversineDistance(
                 this.lastAcceptedPoint.lat,
@@ -429,7 +462,7 @@ class DetektorTracker {
             }
         }
 
-        // FILTER 3: Distance threshold
+        // FILTER 5: Distance threshold
         if (this.lastAcceptedPoint) {
             const distance = this.haversineDistance(
                 this.lastAcceptedPoint.lat,
@@ -440,7 +473,7 @@ class DetektorTracker {
 
             // Dynamic threshold based on accuracy
             const threshold = accuracy < this.minAccuracyForInstantAccept 
-                ? this.minDistanceMeters * 0.5 
+                ? this.minDistanceMeters * 0.7 
                 : this.minDistanceMeters;
 
             if (distance < threshold) {
@@ -450,7 +483,7 @@ class DetektorTracker {
             }
         }
 
-        // FILTER 4: Apply Kalman-like smoothing
+        // FILTER 6: Apply Kalman-like smoothing
         this.updateSmoothedPosition(latitude, longitude);
         const finalLat = this.smoothedLat || latitude;
         const finalLon = this.smoothedLon || longitude;
@@ -476,12 +509,36 @@ class DetektorTracker {
         this.lastAcceptedPoint = point;
         this.lastPointTime = Date.now();
 
-        console.log(`✅ GPS OK: ${accuracy.toFixed(1)}m`);
+        console.log(`✅ GPS OK: ${accuracy.toFixed(1)}m, dist: ${this.lastAcceptedPoint ? this.haversineDistance(this.lastAcceptedPoint.lat, this.lastAcceptedPoint.lon, finalLat, finalLon).toFixed(1) : 0}m`);
         this.gpsText.textContent = `GPS Active (${accuracy.toFixed(0)}m)`;
 
         // Update UI
         this.updateDistance();
         this.draw();
+    }
+
+    isStationary() {
+        // Proveri da li si u krugu stationaryRadius poslednjih N tačaka
+        if (this.recentPoints.length < 5) return false;
+
+        // Izračunaj centroid (prosek) poslednjih tačaka
+        let sumLat = 0, sumLon = 0;
+        this.recentPoints.forEach(p => {
+            sumLat += p.lat;
+            sumLon += p.lon;
+        });
+        const centerLat = sumLat / this.recentPoints.length;
+        const centerLon = sumLon / this.recentPoints.length;
+
+        // Proveri da li su SVE tačke u krugu stationaryRadius od centroida
+        let maxDist = 0;
+        for (let p of this.recentPoints) {
+            const dist = this.haversineDistance(centerLat, centerLon, p.lat, p.lon);
+            if (dist > maxDist) maxDist = dist;
+        }
+
+        // Ako je najdalja tačka < stationaryRadius, stojiš!
+        return maxDist < this.stationaryRadiusMeters;
     }
 
     updateSmoothedPosition(lat, lon) {
