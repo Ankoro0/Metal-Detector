@@ -100,9 +100,37 @@ class DetektorTracker {
         this.newSessionBtn = document.getElementById('newSessionBtn');
         this.deleteSessionBtn = document.getElementById('deleteSessionBtn');
 
+        // Find modal (iskopano)
+        this.findModal = document.getElementById('findModal');
+        this.findDescription = document.getElementById('findDescription');
+        this.findImageInput = document.getElementById('findImageInput');
+        this.findImagePreview = document.getElementById('findImagePreview');
+        this.findImagePreviewImg = document.getElementById('findImagePreviewImg');
+        this.removeImageBtn = document.getElementById('removeImageBtn');
+        this.saveFindBtn = document.getElementById('saveFindBtn');
+        this.cancelFindBtn = document.getElementById('cancelFindBtn');
+
+        // Edit modal
+        this.editModal = document.getElementById('editModal');
+        this.editName = document.getElementById('editName');
+        this.editSignal = document.getElementById('editSignal');
+        this.editDepth = document.getElementById('editDepth');
+        this.editIDRange = document.getElementById('editIDRange');
+        this.editNotes = document.getElementById('editNotes');
+        this.editFindDescription = document.getElementById('editFindDescription');
+        this.editImageInput = document.getElementById('editImageInput');
+        this.editImagePreview = document.getElementById('editImagePreview');
+        this.editImagePreviewImg = document.getElementById('editImagePreviewImg');
+        this.removeEditImageBtn = document.getElementById('removeEditImageBtn');
+        this.saveEditBtn = document.getElementById('saveEditBtn');
+        this.cancelEditBtn = document.getElementById('cancelEditBtn');
+
         // Info banner
         this.infoBanner = document.getElementById('infoBanner');
         this.closeInfoBtn = document.getElementById('closeInfoBtn');
+
+        this.editingCheckpointIndex = null; // Za edit mode
+        this.currentFindCheckpointIndex = null; // Za find modal
 
         this.init();
     }
@@ -138,6 +166,18 @@ class DetektorTracker {
         this.sessionSelect.addEventListener('change', (e) => this.switchSession(e.target.value));
         this.newSessionBtn.addEventListener('click', () => this.createNewSession());
         this.deleteSessionBtn.addEventListener('click', () => this.deleteCurrentSession());
+
+        // Find modal (iskopano)
+        this.findImageInput.addEventListener('change', (e) => this.handleImageUpload(e, 'find'));
+        this.removeImageBtn.addEventListener('click', () => this.removeImage('find'));
+        this.saveFindBtn.addEventListener('click', () => this.saveFindDetails());
+        this.cancelFindBtn.addEventListener('click', () => this.closeFindModal());
+
+        // Edit modal
+        this.editImageInput.addEventListener('change', (e) => this.handleImageUpload(e, 'edit'));
+        this.removeEditImageBtn.addEventListener('click', () => this.removeImage('edit'));
+        this.saveEditBtn.addEventListener('click', () => this.saveEditedCheckpoint());
+        this.cancelEditBtn.addEventListener('click', () => this.closeEditModal());
 
         // Info banner
         this.closeInfoBtn.addEventListener('click', () => this.closeInfoBanner());
@@ -921,15 +961,18 @@ class DetektorTracker {
                     <div class="checkpoint-actions">
                         ${cp.status === 'ACTIVE' ? `
                             <button class="btn-small btn-nav" onclick="app.navigateToCheckpoint(${cp.id})">Navigiraj</button>
-                            <button class="btn-small btn-dig" onclick="app.changeStatus(${cp.id}, 'DUG')">Iskopano</button>
+                            <button class="btn-small btn-edit" onclick="app.openEditModal(${cp.id})">✏️</button>
+                            <button class="btn-small btn-dig" onclick="app.openFindModal(${cp.id})">Iskopano</button>
                             <button class="btn-small btn-ignore" onclick="app.changeStatus(${cp.id}, 'IGNORED')">Ignoriši</button>
                         ` : ''}
                         ${cp.status === 'DUG' || cp.status === 'IGNORED' ? `
+                            <button class="btn-small btn-edit" onclick="app.openEditModal(${cp.id})">✏️</button>
                             <button class="btn-small btn-recheck" onclick="app.changeStatus(${cp.id}, 'RECHECK')">Proveri Opet</button>
                         ` : ''}
                         ${cp.status === 'RECHECK' ? `
                             <button class="btn-small btn-nav" onclick="app.navigateToCheckpoint(${cp.id})">Navigiraj</button>
-                            <button class="btn-small btn-dig" onclick="app.changeStatus(${cp.id}, 'DUG')">Iskopano</button>
+                            <button class="btn-small btn-edit" onclick="app.openEditModal(${cp.id})">✏️</button>
+                            <button class="btn-small btn-dig" onclick="app.openFindModal(${cp.id})">Iskopano</button>
                         ` : ''}
                         <button class="btn-small btn-delete" onclick="app.deleteCheckpoint(${cp.id})">Obriši</button>
                     </div>
@@ -975,6 +1018,165 @@ class DetektorTracker {
 
         // TODO: Implementiraj navigaciju - prikaži putanju na mapi
         alert(`Navigacija do: ${checkpoint.name}\nLat: ${checkpoint.lat}, Lon: ${checkpoint.lon}`);
+    }
+
+    // ===== FIND MODAL (Iskopano) =====
+
+    openFindModal(checkpointId) {
+        const checkpoint = this.checkpoints.find(cp => cp.id === checkpointId);
+        if (!checkpoint) return;
+
+        this.currentFindCheckpointIndex = checkpointId;
+        
+        // Popuni postojeće podatke ako postoje
+        this.findDescription.value = checkpoint.findDescription || '';
+        
+        if (checkpoint.findImage) {
+            this.findImagePreviewImg.src = checkpoint.findImage;
+            this.findImagePreview.classList.remove('hidden');
+        } else {
+            this.findImagePreview.classList.add('hidden');
+        }
+
+        this.findModal.classList.remove('hidden');
+    }
+
+    closeFindModal() {
+        this.findModal.classList.add('hidden');
+        this.findDescription.value = '';
+        this.findImageInput.value = '';
+        this.findImagePreview.classList.add('hidden');
+        this.currentFindCheckpointIndex = null;
+    }
+
+    async saveFindDetails() {
+        if (!this.currentFindCheckpointIndex) return;
+
+        const checkpoint = this.checkpoints.find(cp => cp.id === this.currentFindCheckpointIndex);
+        if (!checkpoint) return;
+
+        checkpoint.status = 'DUG';
+        checkpoint.findDescription = this.findDescription.value.trim();
+        
+        if (this.findImagePreviewImg.src && !this.findImagePreviewImg.src.startsWith('data:')) {
+            // Ako je vec učitana slika, sačuvaj je
+        } else if (this.findImageInput.files && this.findImageInput.files[0]) {
+            // Nova slika
+            const base64 = await this.fileToBase64(this.findImageInput.files[0]);
+            checkpoint.findImage = base64;
+        }
+
+        await detektorDB.updateCheckpoint(this.currentFindCheckpointIndex, {
+            status: 'DUG',
+            findDescription: checkpoint.findDescription,
+            findImage: checkpoint.findImage
+        });
+
+        this.renderCheckpoints();
+        this.draw();
+        this.closeFindModal();
+        alert('✅ Detalji nalaza sačuvani!');
+    }
+
+    // ===== EDIT MODAL =====
+
+    openEditModal(checkpointId) {
+        const checkpoint = this.checkpoints.find(cp => cp.id === checkpointId);
+        if (!checkpoint) return;
+
+        this.editingCheckpointIndex = checkpointId;
+
+        // Popuni polja
+        this.editName.value = checkpoint.name || '';
+        this.editSignal.value = checkpoint.signalStrength || 'medium';
+        this.editDepth.value = checkpoint.depth || '';
+        this.editIDRange.value = checkpoint.idRange || '';
+        this.editNotes.value = checkpoint.notes || '';
+        this.editFindDescription.value = checkpoint.findDescription || '';
+
+        if (checkpoint.findImage) {
+            this.editImagePreviewImg.src = checkpoint.findImage;
+            this.editImagePreview.classList.remove('hidden');
+        } else {
+            this.editImagePreview.classList.add('hidden');
+        }
+
+        this.editModal.classList.remove('hidden');
+    }
+
+    closeEditModal() {
+        this.editModal.classList.add('hidden');
+        this.editingCheckpointIndex = null;
+    }
+
+    async saveEditedCheckpoint() {
+        if (!this.editingCheckpointIndex) return;
+
+        const checkpoint = this.checkpoints.find(cp => cp.id === this.editingCheckpointIndex);
+        if (!checkpoint) return;
+
+        checkpoint.name = this.editName.value.trim() || checkpoint.name;
+        checkpoint.signalStrength = this.editSignal.value;
+        checkpoint.depth = this.editDepth.value ? parseInt(this.editDepth.value) : null;
+        checkpoint.idRange = this.editIDRange.value.trim();
+        checkpoint.notes = this.editNotes.value.trim();
+        checkpoint.findDescription = this.editFindDescription.value.trim();
+
+        if (this.editImageInput.files && this.editImageInput.files[0]) {
+            const base64 = await this.fileToBase64(this.editImageInput.files[0]);
+            checkpoint.findImage = base64;
+        }
+
+        await detektorDB.updateCheckpoint(this.editingCheckpointIndex, checkpoint);
+
+        this.renderCheckpoints();
+        this.draw();
+        this.closeEditModal();
+        alert('✅ Checkpoint ažuriran!');
+    }
+
+    // ===== IMAGE HANDLING =====
+
+    async handleImageUpload(event, modalType) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const base64 = await this.fileToBase64(file);
+
+        if (modalType === 'find') {
+            this.findImagePreviewImg.src = base64;
+            this.findImagePreview.classList.remove('hidden');
+        } else if (modalType === 'edit') {
+            this.editImagePreviewImg.src = base64;
+            this.editImagePreview.classList.remove('hidden');
+        }
+    }
+
+    removeImage(modalType) {
+        if (modalType === 'find') {
+            this.findImageInput.value = '';
+            this.findImagePreviewImg.src = '';
+            this.findImagePreview.classList.add('hidden');
+        } else if (modalType === 'edit') {
+            this.editImageInput.value = '';
+            this.editImagePreviewImg.src = '';
+            this.editImagePreview.classList.add('hidden');
+            
+            // Označi da treba obrisati sliku iz checkpoint-a
+            const checkpoint = this.checkpoints.find(cp => cp.id === this.editingCheckpointIndex);
+            if (checkpoint) {
+                checkpoint.findImage = null;
+            }
+        }
+    }
+
+    fileToBase64(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+        });
     }
 
     // ===== MATH & UTILS =====
@@ -1493,6 +1695,12 @@ class DetektorTracker {
             prompt += `   Distanca od starta: ${cp.distanceFromStart.toFixed(0)}m\n`;
             if (cp.notes) {
                 prompt += `   Napomena: ${cp.notes}\n`;
+            }
+            if (cp.findDescription) {
+                prompt += `   📦 ISKOPANO: ${cp.findDescription}\n`;
+            }
+            if (cp.findImage) {
+                prompt += `   📷 Fotografija dostupna (base64 slika u localStorage-u)\n`;
             }
             prompt += `\n`;
         });
